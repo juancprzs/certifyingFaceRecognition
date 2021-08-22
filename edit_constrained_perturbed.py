@@ -24,6 +24,10 @@ from models.stylegan_generator import StyleGANGenerator
 from utils.logger import setup_logger
 from utils.manipulator import linear_interpolate
 
+# Local imports
+import os.path as osp
+from proj_utils import (get_projection_matrices, sample_ellipsoid, sq_distance,
+  project_to_region, DATASETS, GAN_NAMES, ATTRS)
 
 def parse_args():
   """Parses arguments."""
@@ -35,8 +39,10 @@ def parse_args():
                       help='Name of the model for generation. (required)')
   parser.add_argument('-o', '--output_dir', type=str, required=True,
                       help='Directory to save the output results. (required)')
-  parser.add_argument('-b', '--boundary_path', type=str, required=True,
-                      help='Path to the semantic boundary. (required)')
+  parser.add_argument('-d', '--dataset', type=str, default='ffhq',
+                      help='Name of dataset (default: ffhq)', choices=DATASETS)
+  parser.add_argument('-g', '--gan_name', type=str, default='stylegan',
+                      help='Name of GAN (default: stylegan)', choices=GAN_NAMES)
   parser.add_argument('-i', '--input_latent_codes_path', type=str, default='',
                       help='If specified, will load latent codes from given '
                            'path instead of randomly sampling. (optional)')
@@ -47,14 +53,10 @@ def parse_args():
   parser.add_argument('-s', '--latent_space_type', type=str, default='z',
                       choices=['z', 'Z', 'w', 'W', 'wp', 'wP', 'Wp', 'WP'],
                       help='Latent space used in Style GAN. (default: `Z`)')
-  parser.add_argument('--start_distance', type=float, default=-3.0,
-                      help='Start point for manipulation in latent space. '
-                           '(default: -3.0)')
-  parser.add_argument('--end_distance', type=float, default=3.0,
-                      help='End point for manipulation in latent space. '
-                           '(default: 3.0)')
-  parser.add_argument('--steps', type=int, default=10,
+  parser.add_argument('--samples', type=int, default=10,
                       help='Number of steps for image editing. (default: 10)')
+  parser.add_argument('--sample_surface', action='store_true',
+                      help='Sample from surface of hyper-ellipsoid of interest')
 
   return parser.parse_args()
 
@@ -62,6 +64,22 @@ def parse_args():
 def main():
   """Main function."""
   args = parse_args()
+  # --> We modify from here
+  # Get our projection matrices
+  proj_mat, ellipse_mat, dirs, files = get_projection_matrices(
+    dataset=args.dataset, gan_name=args.gan_name
+  )
+  # Sample deltas
+  ellipse_points = sample_ellipsoid(ellipse_mat, n_vecs=args.samples)
+  # Project points inside ellipse to subspace spanned by our directions
+  inside_ellipse, inside_dirs = project_to_region(ellipse_points, proj_mat, 
+      ellipse_mat, check=True, dirs=dirs, on_surface=args.sample_surface)
+  if not args.sample_surface:
+    assert np.allclose(inside_ellipse, inside_dirs), 'Should be the same, as '\
+      'they were sampled within ellipse'
+  deltas = inside_ellipse.T # 'deltas' is of shape [args.samples, n_dims]
+  # --> From here
+
   logger = setup_logger(args.output_dir, logger_name='generate_data')
 
   logger.info(f'Initializing generator.')
@@ -76,10 +94,11 @@ def main():
     raise NotImplementedError(f'Not implemented GAN type `{gan_type}`!')
 
   logger.info(f'Preparing boundary.')
-  if not os.path.isfile(args.boundary_path):
-    raise ValueError(f'Boundary `{args.boundary_path}` does not exist!')
-  boundary = np.load(args.boundary_path)
-  np.save(os.path.join(args.output_dir, 'boundary.npy'), boundary)
+  for boundary_file in files:
+    boundary = np.load(boundary_file)
+    basename = osp.basename(boundary_file).replace('.npy', '')
+    new_filename = osp.join(args.output_dir, f'boundary_{basename}.npy')
+    np.save(new_filename, boundary)
 
   logger.info(f'Preparing latent codes.')
   if os.path.isfile(args.input_latent_codes_path):
@@ -90,17 +109,14 @@ def main():
     logger.info(f'  Sample latent codes randomly.')
     latent_codes = model.easy_sample(args.num, **kwargs)
   np.save(os.path.join(args.output_dir, 'latent_codes.npy'), latent_codes)
-  total_num = latent_codes.shape[0]
+  total_num = 6 # latent_codes.shape[0]
 
   logger.info(f'Editing {total_num} samples.')
   for sample_id in tqdm(range(total_num), leave=False):
-    interpolations = linear_interpolate(latent_codes[sample_id:sample_id + 1],
-                                        boundary,
-                                        start_distance=args.start_distance,
-                                        end_distance=args.end_distance,
-                                        steps=args.steps)
+    curr_code = latent_codes[sample_id:sample_id + 1]
+    new_codes = curr_code + deltas
     interpolation_id = 0
-    for interpolations_batch in model.get_batch_inputs(interpolations):
+    for interpolations_batch in model.get_batch_inputs(new_codes):
       if gan_type == 'pggan':
         outputs = model.easy_synthesize(interpolations_batch)
       elif gan_type == 'stylegan':
@@ -110,7 +126,7 @@ def main():
                                  f'{sample_id:03d}_{interpolation_id:03d}.jpg')
         cv2.imwrite(save_path, image[:, :, ::-1])
         interpolation_id += 1
-    assert interpolation_id == args.steps
+    assert interpolation_id == args.samples
     logger.debug(f'  Finished sample {sample_id:3d}.')
   logger.info(f'Successfully edited {total_num} samples.')
 

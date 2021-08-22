@@ -3,13 +3,20 @@ import scipy
 import numpy as np
 from glob import glob
 import os.path as osp
+from collections import OrderedDict
 from scipy.optimize import root_scalar
 
 DEMO = False
 BOUNDARIES_DIR = 'boundaries'
-DATASET = ['ffhq', 'celebahq']
-GAN_NAME = ['stylegan', 'pggan']
-ATTRS = ['age', 'eyeglasses', 'gender', 'pose', 'smile']
+DATASETS = ['ffhq', 'celebahq']
+GAN_NAMES = ['stylegan', 'pggan']
+ATTRS = OrderedDict()
+ATTRS['age'] = 0.5
+ATTRS['eyeglasses'] = 0.5
+ATTRS['gender'] = 0.2
+ATTRS['pose'] =   0.5
+ATTRS['smile'] =  0.8
+
 
 def sq_distance(A, shifted):
     transp = np.transpose(shifted, (0, 2, 1))
@@ -247,7 +254,8 @@ def mvee(points, tol=0.001):
     return np.asarray(A), np.squeeze(np.asarray(c))
 
 
-def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None):
+def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None, 
+        on_surface=False):
     '''
     vs: vectors to project (d x n1)
     proj_mat: matrix to project vectors to subspace spanned by directions (cols 
@@ -258,16 +266,24 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None):
     '''
     # Project to space spanned by dirs
     proj_subs = proj_mat @ vs # Project vector to subspace
-    # The projection of query vector onto the ellipse
-    proj_ell, _, _ = proj_ellipse(proj_subs, ellipse_mat)
+    if on_surface:
+        dists = sq_distance(ellipse_mat, np.expand_dims(proj_subs.T, axis=2))
+        proj_ell = proj_subs / np.sqrt(dists)
+    else:
+        # The projection of query vector onto the ellipse
+        proj_ell, _, _ = proj_ellipse(proj_subs, ellipse_mat)
 
     if check:
         assert dirs is not None, \
             "Must provide 'dirs' if want to check projection"
         # Check for subspace
         proj_subs2 = dirs @ np.linalg.pinv(dirs) @ vs
+        assert np.allclose(proj_subs, proj_subs2), 'Projection to subspace is '\
+            'wrong'
         # Check for ellipse
-        ellps_dist = sq_distance(ellipse_mat, np.expand_dims(proj_ell.T, axis=2))
+        ellps_dist = sq_distance(
+            ellipse_mat, np.expand_dims(proj_ell.T, axis=2)
+        )
         assert np.allclose(ellps_dist[ellps_dist > 1.], 1), \
             'Some points outside ellipsoid!'
     
@@ -333,8 +349,8 @@ def plot_inner_prods(dirs):
     # We want to show all ticks...
     ax.set_xticks(np.arange(len(ATTRS))); ax.set_yticks(np.arange(len(ATTRS)))
     # ... and label them with the respective list entries
-    ax.set_xticklabels(ATTRS, fontsize=24)
-    ax.set_yticklabels(ATTRS, fontsize=24)
+    ax.set_xticklabels(list(ATTRS.keys()), fontsize=24)
+    ax.set_yticklabels(list(ATTRS.keys()), fontsize=24)
 
     # Rotate the tick labels and set their alignment.
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
@@ -351,18 +367,22 @@ def plot_inner_prods(dirs):
     plt.show()
 
 
-def get_projection_matrices(dataset=DATASET[0], GAN_NAME=GAN_NAME[0]):
+def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0]):
     plot_mat = False
-    FILE_TEMPLATE = osp.join(BOUNDARIES_DIR, 
-                             f'{GAN_NAME}_{dataset}_%s_w_boundary.npy')
+    file_template = osp.join(BOUNDARIES_DIR, 
+                             f'{gan_name}_{dataset}_%s_w_boundary.npy')
 
     all_bounds = glob(osp.join(BOUNDARIES_DIR, '*.npy'))
 
-    dirs = []
-    for att in ATTRS:
-        this_file = FILE_TEMPLATE % att
-        assert this_file in all_bounds, f'Boundary for attr "{att}" not found!'
-        dirs.append(np.load(this_file))
+    dirs, files = [], []
+    for att_name, magn in ATTRS.items():
+        this_file = file_template % att_name
+        assert this_file in all_bounds, \
+            f'Boundary for attr "{att_name}" not found!'
+        # Load vector and modify its magnitude
+        this_dir = magn * np.load(this_file)
+        dirs.append(this_dir)
+        files.append(this_file)
 
     dirs = np.concatenate(dirs, axis=0).T
     # dirs.shape == [n_dims, n_dirs] == [n_dims, len(ATTRS)]
@@ -379,9 +399,10 @@ def get_projection_matrices(dataset=DATASET[0], GAN_NAME=GAN_NAME[0]):
     # my_X = my_mvee(dirs_expanded, exp_out)
     # assert np.allclose(X, my_X)
 
-    # Return
-    # proj to subspace, mat parameterizing ellipse and directions
-    return proj_mat, ellipse_mat, dirs
+    # Return:
+    # proj to subspace, mat parameterizing ellipse, directions, and 
+    # files from which the directions came
+    return proj_mat, ellipse_mat, dirs, files
 
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -541,6 +562,5 @@ if __name__ == '__main__':
     # With these matrices, we can project to region with
     # proj_reg, proj_subs = project_to_region(q, proj_mat, ellipse_mat, 
     #     check=True, dirs=dirs)
-    import pdb; pdb.set_trace()
     if DEMO:
         main()

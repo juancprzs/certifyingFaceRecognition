@@ -90,7 +90,7 @@ def main():
     latent_codes = model.easy_sample(args.num, **kwargs)
   np.save(os.path.join(args.output_dir, 'latent_codes.npy'), latent_codes)
   total_num = latent_codes.shape[0]
-
+  total_num = 6 # I added this to make visualization faster
   logger.info(f'Editing {total_num} samples.')
   for sample_id in tqdm(range(total_num), leave=False):
     interpolations = linear_interpolate(latent_codes[sample_id:sample_id + 1],
