@@ -235,7 +235,8 @@ def linear_interpolate(latent_code,
 
   linspace = np.linspace(start_distance, end_distance, steps)
   if len(latent_code.shape) == 2:
-    linspace = linspace - latent_code.dot(boundary.T)
+    # Remind me I commented this out
+    # linspace = linspace - latent_code.dot(boundary.T)
     linspace = linspace.reshape(-1, 1).astype(np.float32)
     return latent_code + linspace * boundary
   if len(latent_code.shape) == 3:
