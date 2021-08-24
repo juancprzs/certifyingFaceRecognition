@@ -64,21 +64,10 @@ def parse_args():
 def main():
   """Main function."""
   args = parse_args()
-  # --> We modify from here
   # Get our projection matrices
   proj_mat, ellipse_mat, dirs, files = get_projection_matrices(
     dataset=args.dataset, gan_name=args.gan_name
   )
-  # Sample deltas
-  ellipse_points = sample_ellipsoid(ellipse_mat, n_vecs=args.samples)
-  # Project points inside ellipse to subspace spanned by our directions
-  inside_ellipse, inside_dirs = project_to_region(ellipse_points, proj_mat, 
-      ellipse_mat, check=True, dirs=dirs, on_surface=args.sample_surface)
-  if not args.sample_surface:
-    assert np.allclose(inside_ellipse, inside_dirs), 'Should be the same, as '\
-      'they were sampled within ellipse'
-  deltas = inside_ellipse.T # 'deltas' is of shape [args.samples, n_dims]
-  # --> From here
 
   logger = setup_logger(args.output_dir, logger_name='generate_data')
 
@@ -109,12 +98,24 @@ def main():
     logger.info(f'  Sample latent codes randomly.')
     latent_codes = model.easy_sample(args.num, **kwargs)
   np.save(os.path.join(args.output_dir, 'latent_codes.npy'), latent_codes)
-  total_num = 6 # latent_codes.shape[0]
+  total_num = latent_codes.shape[0]
 
   logger.info(f'Editing {total_num} samples.')
   for sample_id in tqdm(range(total_num), leave=False):
-    curr_code = latent_codes[sample_id:sample_id + 1]
-    new_codes = curr_code + deltas
+    # # # #                       From here
+    # Get the deltas
+    ellipse_points = sample_ellipsoid(ellipse_mat, n_vecs=args.samples)
+    # Project points inside ellipse to subspace spanned by our directions
+    inside_ellipse, inside_dirs = project_to_region(ellipse_points, proj_mat, 
+        ellipse_mat, check=True, dirs=dirs, on_surface=args.sample_surface)
+    if not args.sample_surface:
+      assert np.allclose(inside_ellipse, inside_dirs), 'Should be equal, as '\
+        'they were sampled within ellipse'
+    deltas = inside_ellipse.T # 'deltas' is of shape [args.samples, n_dims]
+    class_path = osp.join(args.output_dir, 'data', f'class_{sample_id:03d}')
+    os.makedirs(class_path)
+    # # # #                       To here
+    new_codes = latent_codes[sample_id:sample_id + 1] + deltas
     interpolation_id = 0
     for interpolations_batch in model.get_batch_inputs(new_codes):
       if gan_type == 'pggan':
@@ -122,8 +123,9 @@ def main():
       elif gan_type == 'stylegan':
         outputs = model.easy_synthesize(interpolations_batch, **kwargs)
       for image in outputs['image']:
-        save_path = os.path.join(args.output_dir,
-                                 f'{sample_id:03d}_{interpolation_id:03d}.jpg')
+        save_path = osp.join(class_path, f'{interpolation_id:03d}.jpg')
+        # from glob import glob
+        # import pdb; pdb.set_trace()
         cv2.imwrite(save_path, image[:, :, ::-1])
         interpolation_id += 1
     assert interpolation_id == args.samples
