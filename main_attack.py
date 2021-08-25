@@ -8,16 +8,17 @@ from glob import glob
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
-from collections import OrderedDict
-from utils.logger import setup_logger
+import torch.nn.functional as F
 from torchvision.datasets import ImageFolder
-from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import InterpolationMode
-from models.mod_stylegan_generator import ModStyleGANGenerator
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 # Face recognition models
 from models.iresnet import iresnet50
 from facenet_pytorch import InceptionResnetV1
+# Local imports
+from utils.logger import setup_logger
+from models.mod_stylegan_generator import ModStyleGANGenerator
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -56,31 +57,15 @@ LAT_CODES = torch.from_numpy(
 )
 
 
-from models.stylegan_generator import StyleGANGenerator
-OTHER_LOGGER = setup_logger('other_' + OUTPUT_DIR, logger_name='other_generate_data')
-OTHER_LOGGER.info(f'Initializing generator.')
-OTHER_MODEL = StyleGANGenerator('stylegan_ffhq', OTHER_LOGGER)
-OTHER_LAT_CODES = OTHER_MODEL.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-
-
 def get_images_from_latent(lat_codes):
-    for batch in MODEL.get_batch_inputs(lat_codes):
-        outputs = MODEL.easy_synthesize(batch, **KWARGS)
-        for image in outputs['image']:
-            break
-        break
-    for batch in OTHER_MODEL.get_batch_inputs(OTHER_LAT_CODES):
-        other_outputs = OTHER_MODEL.easy_synthesize(batch, **KWARGS)
-        for other_image in other_outputs['image']:
-            break 
-        break
+    outputs = []
+    for idx, batch in enumerate(MODEL.get_batch_inputs(lat_codes)):
+        out = MODEL.easy_synthesize(batch, **KWARGS)
+        for image in out['image']:
+            outputs.append(image)
+        
+    return torch.cat([x.unsqueeze(0) for x in outputs])
 
-    
-    import pdb; pdb.set_trace()
-
-
-
-get_images_from_latent(LAT_CODES)
 
 def pil_loader(path: str) -> Image.Image:
     # Taken from 
@@ -152,22 +137,23 @@ class ImageFolderWithPaths(ImageFolder):
         return (original_tuple[0], path)
 
 
-def compute_embs(net, original=False):
-    if original:
-        print('Computing ORIGINAL embeddings')
-        dataset = SimpleDataset(root=ORIG_IMAGES_PATH, transform=TRANSFORM)
-    else:
-        print('Computing NEW embeddings')
-        dataset = ImageFolderWithPaths(root=DATA_PATH, transform=TRANSFORM)
-        # ImageFolder will have, possibly, screwed up the mapping from class 
-        # name to idx. Like: dataset.class_to_idx can be
-        # {'class_552': 4552, 'class_553': 4553, 'class_554': 4554} instead of 
-        # the obvious. We correct for this here:
-        dataset.class_to_idx = { k : int(k.split('_')[1]) 
-            for k in dataset.class_to_idx.keys() }
+def compute_embs(net, original=False, dataset=None):
+    if dataset is None:
+        if original:
+            print('Computing ORIGINAL embeddings')
+            dataset = SimpleDataset(root=ORIG_IMAGES_PATH, transform=TRANSFORM)
+        else:
+            print('Computing NEW embeddings')
+            dataset = ImageFolderWithPaths(root=DATA_PATH, transform=TRANSFORM)
+            # ImageFolder will have, possibly, screwed up the mapping from class 
+            # name to idx. Like: dataset.class_to_idx can be
+            # {'class_552': 4552, 'class_553': 4553, 'class_554': 4554} instead of 
+            # the obvious. We correct for this here:
+            dataset.class_to_idx = { k : int(k.split('_')[1]) 
+                for k in dataset.class_to_idx.keys() }
     
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, 
-        num_workers=20)
+        num_workers=0)
     return get_embs(dataloader, original=original)
 
 
@@ -201,6 +187,16 @@ def get_dists(embs1, embs2, method='insightface'):
 
 # DNN
 net = get_net(method=METHOD)
+
+# ------------------------------------------------------------------------------
+some_codes = LAT_CODES[:11]
+some_codes.requires_grad = True
+ims = get_images_from_latent(some_codes).to('cpu')
+ims2 = F.interpolate(ims, size=(IMG_SIZE, IMG_SIZE), mode='bilinear')
+local_dataset = TensorDataset(ims2, torch.zeros(ims2.size(0)))
+local_embs, _ = compute_embs(net, original=False, dataset=local_dataset)
+import pdb; pdb.set_trace()
+# ------------------------------------------------------------------------------
 
 # # # # # Embeddings of the original images
 embs, im_names = compute_embs(net, original=True)

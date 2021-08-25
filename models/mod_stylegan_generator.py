@@ -300,10 +300,10 @@ class ModStyleGANGenerator(BaseGenerator):
       raise ValueError(f'Input should be with shape [batch_size, channel, '
                        f'height, width], where channel equals to 1 or 3. '
                        f'But {images_shape} is received!')
-    images = (images - self.min_val) * 255 / (self.max_val - self.min_val)
-    images = torch.clamp(images + 0.5, 0, 255).type(torch.uint8)
-    images = images.permute(0, 2, 3, 1)
-    if self.channel_order == 'BGR':
-      images = images[:, :, :, ::-1]
+    # images = (images - self.min_val) * 255 / (self.max_val - self.min_val)
+    images = (images - self.min_val) / (self.max_val - self.min_val)
+    # images = torch.clamp(images + 0.5, 0, 255) # .type(torch.uint8)
+    offset = 0.5 / 255.
+    images = torch.clamp(images + offset, 0, 1)
 
     return images
