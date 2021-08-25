@@ -9,9 +9,11 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from collections import OrderedDict
+from utils.logger import setup_logger
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import InterpolationMode
+from models.mod_stylegan_generator import ModStyleGANGenerator
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 # Face recognition models
 from models.iresnet import iresnet50
@@ -19,28 +21,67 @@ from facenet_pytorch import InceptionResnetV1
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+
+# Constants
 PLOT = False
 EMB_SIZE = 512
+LAT_SPACE = 'w'
 BATCH_SIZE = 32
 N_SHOW_ERRS = 5
 METHOD = 'insightface'
+OUTPUT_DIR = 'remove_soon'
 FRS_METHODS = ['insightface', 'facenet']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
 ORIG_IMAGES_PATH = 'data/stylegan_ffhq_recog_debug'
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
 DATA_PATH = 'results/stylegan_ffhq_recog_debug_perts/data'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-TRANSFORM = Compose([ # Remind me to change the size for Resize
+TRANSFORM = Compose([
     Resize(size=(IMG_SIZE, IMG_SIZE), 
         interpolation=InterpolationMode.BILINEAR), # cv2's default
     ToTensor(),
     Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
-
 assert METHOD in FRS_METHODS
 
 
-# Get the embeddings of the original (unperturbed) images
+# The model and the latent codes
+LOGGER = setup_logger(OUTPUT_DIR, logger_name='generate_data')
+LOGGER.info(f'Initializing generator.')
+MODEL = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
+KWARGS = { 'latent_space_type' : LAT_SPACE }
+LAT_CODES_PATH = osp.join(ORIG_IMAGES_PATH, f'{LAT_SPACE}.npy')
+LAT_CODES = torch.from_numpy(
+    MODEL.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
+)
+
+
+from models.stylegan_generator import StyleGANGenerator
+OTHER_LOGGER = setup_logger('other_' + OUTPUT_DIR, logger_name='other_generate_data')
+OTHER_LOGGER.info(f'Initializing generator.')
+OTHER_MODEL = StyleGANGenerator('stylegan_ffhq', OTHER_LOGGER)
+OTHER_LAT_CODES = OTHER_MODEL.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
+
+
+def get_images_from_latent(lat_codes):
+    for batch in MODEL.get_batch_inputs(lat_codes):
+        outputs = MODEL.easy_synthesize(batch, **KWARGS)
+        for image in outputs['image']:
+            break
+        break
+    for batch in OTHER_MODEL.get_batch_inputs(OTHER_LAT_CODES):
+        other_outputs = OTHER_MODEL.easy_synthesize(batch, **KWARGS)
+        for other_image in other_outputs['image']:
+            break 
+        break
+
+    
+    import pdb; pdb.set_trace()
+
+
+
+get_images_from_latent(LAT_CODES)
+
 def pil_loader(path: str) -> Image.Image:
     # Taken from 
     # https://pytorch.org/vision/0.8/_modules/torchvision/datasets/folder.html#ImageFolder
@@ -268,7 +309,6 @@ sorted_counts = counts[sorted_ids]
 
 troubling_ids = sorted_ids[sorted_counts > 0]
 troubling_counts = sorted_counts[sorted_counts > 0]
-print(troubling_ids)
 
 
 # Plot some troubling identities

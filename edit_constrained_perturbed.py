@@ -122,10 +122,9 @@ def main():
         outputs = model.easy_synthesize(interpolations_batch)
       elif gan_type == 'stylegan':
         outputs = model.easy_synthesize(interpolations_batch, **kwargs)
+      
       for image in outputs['image']:
         save_path = osp.join(class_path, f'{interpolation_id:03d}.jpg')
-        # from glob import glob
-        # import pdb; pdb.set_trace()
         cv2.imwrite(save_path, image[:, :, ::-1])
         interpolation_id += 1
     assert interpolation_id == args.samples
