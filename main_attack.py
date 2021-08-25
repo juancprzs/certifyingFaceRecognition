@@ -275,19 +275,6 @@ print(troubling_ids)
 if PLOT:
     print(f'Will show {N_SHOW_ERRS} identities with multiple errors')
     for tr_id in troubling_ids[:N_SHOW_ERRS]:
-        '''
-        paths = glob(osp.join(DATA_PATH, 'class_' + f'{tr_id}'.zfill(3), 
-            '*.jpg'))
-        import pdb; pdb.set_trace()
-        paths = sorted(paths, 
-            key=lambda x: int(osp.basename(x).replace('.jpg', '')))
-        ims = OrderedDict([ (osp.basename(p), mpimg.imread(p)) for p in paths])
-        sorted_keys = sorted(ims.keys(), 
-            key=lambda x: int(x.replace('.jpg', '')))
-        which = torch.nonzero(targets == tr_id)
-        these_preds = preds[targets == tr_id]
-        '''
-
         fig, axes = plt.subplots(nrows=4, ncols=perts_per_id)
         # The anchor image for this ID
         orig_im_path = osp.join(ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + '.jpg')
