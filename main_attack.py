@@ -1,6 +1,7 @@
 import cv2
 import torch
 import numpy as np
+import pandas as pd
 import os.path as osp
 from tqdm import tqdm
 from glob import glob
@@ -21,6 +22,7 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 PLOT = False
 EMB_SIZE = 512
 BATCH_SIZE = 32
+N_SHOW_ERRS = 5
 METHOD = 'insightface'
 FRS_METHODS = ['insightface', 'facenet']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
@@ -158,6 +160,7 @@ def get_dists(embs1, embs2, method='insightface'):
 
 # DNN
 net = get_net(method=METHOD)
+
 # # # # # Embeddings of the original images
 embs, im_names = compute_embs(net, original=True)
 orig_labels = torch.tensor([int(x.replace('.jpg','')) for x in im_names])
@@ -186,7 +189,7 @@ perts_per_id = new_embs.size(0) // embs.size(0)
 
 # Compute distances within clusters
 dists = get_dists(new_embs, embs, method=METHOD)
-dists_to_centroid = torch.gather(dists, 1, targets.view(-1,1))
+dists_to_centroid = torch.gather(dists, 1, targets.view(-1, 1))
 if PLOT:
     plt.hist(dists_to_centroid.numpy(), edgecolor='black', linewidth=1, bins=20)
     mean, std = dists_to_centroid.mean(), dists_to_centroid.std()
@@ -198,13 +201,26 @@ if PLOT:
 
 # # # # # Check the accuracy of the network on these images
 # Nearest neighbor
-assigns = torch.argmin(dists, axis=1)
+argsort = torch.argsort(dists, dim=1, descending=False) # Ascending order
+assigns = argsort[:, 0] # Equivalent to torch.argmin(dists, dim=1)
 # Prediction is: each instance is of the same class as the instance at embs[assigns]
 preds = orig_labels[assigns]
 correct = (preds == targets).sum().item()
 n_wrong = new_embs.size(0) - correct
 acc = correct / new_embs.size(0)
 print(f'Accuracy is {100.*acc:3.2f}%')
+
+
+# Create DataFrame for easier extraction of data
+dists_to_preds = torch.gather(dists, 1, preds.view(-1, 1))
+df = pd.DataFrame({
+    'im_path' : new_im_names, 
+    'target' : targets, 
+    'dist2target' : dists_to_centroid.squeeze(), 
+    'pred' : assigns, 
+    'dist2pred' : dists_to_preds.squeeze()
+})
+
 
 where_wrong = preds != targets
 # Get the counts through hist and then close the figure
@@ -253,34 +269,71 @@ sorted_counts = counts[sorted_ids]
 troubling_ids = sorted_ids[sorted_counts > 0]
 troubling_counts = sorted_counts[sorted_counts > 0]
 print(troubling_ids)
-import pdb; pdb.set_trace()
 
+
+# Plot some troubling identities
 if PLOT:
-    for tr_id in troubling_ids:
-        # The anchor image for this ID
-        orig_im_path = osp.join(ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + '.jpg')
-        orig_im = mpimg.imread(orig_im_path)
-        # The images whose target was this ID
+    print(f'Will show {N_SHOW_ERRS} identities with multiple errors')
+    for tr_id in troubling_ids[:N_SHOW_ERRS]:
+        '''
         paths = glob(osp.join(DATA_PATH, 'class_' + f'{tr_id}'.zfill(3), 
             '*.jpg'))
-        paths = sorted(paths, key=lambda x: int(osp.basename(x).replace('.jpg', '')))
+        import pdb; pdb.set_trace()
+        paths = sorted(paths, 
+            key=lambda x: int(osp.basename(x).replace('.jpg', '')))
         ims = OrderedDict([ (osp.basename(p), mpimg.imread(p)) for p in paths])
         sorted_keys = sorted(ims.keys(), 
             key=lambda x: int(x.replace('.jpg', '')))
         which = torch.nonzero(targets == tr_id)
         these_preds = preds[targets == tr_id]
+        '''
 
         fig, axes = plt.subplots(nrows=4, ncols=perts_per_id)
-        # The original image
-        mid_axis = axes[0, perts_per_id//2]
-        mid_axis.imshow(orig_im)
-        mid_axis.axis('off')
+        # The anchor image for this ID
+        orig_im_path = osp.join(ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + '.jpg')
+        orig_im = mpimg.imread(orig_im_path)
+        mid_axes = axes[0, perts_per_id//2]
+        mid_axes.imshow(orig_im); mid_axes.set_title(f'{tr_id}', fontsize=20)
+
+        # The images whose target was this ID
+        where_bool = df['im_path'].apply(
+            lambda x: x.startswith('class_' + f'{tr_id}'.zfill(3) + '/'))
+        these_ims_df = df.loc[where_bool]
+        these_ims_df.sort_values(by='im_path')
+
         # Each image
+        for index, (_, row) in enumerate(these_ims_df.iterrows()):
+            dist2target = row['dist2target']
+            im_name = row['im_path']
+            titl = f'{im_name}\nDist2target = {dist2target:.2f}'
+            if row['target'] == row['pred']: # Correctly classified
+                axis_idx = 1
+            else: # Incorrectly classified
+                axis_idx = 2
+                dist2pred = row['dist2pred']
+                titl += f'\nDist2pred = {dist2pred:.2f}'
+                # Load the anchor image
+                this_pred = row['pred']
+                anchor_im_path = osp.join(ORIG_IMAGES_PATH, 
+                    f'{this_pred}'.zfill(6) + '.jpg')
+                anchor_im = mpimg.imread(anchor_im_path)
+                axes[3, index].imshow(anchor_im)
+                axes[3, index].set_title(f'{this_pred}', fontsize=20)
+
+            # The image itself
+            this_im = mpimg.imread(osp.join(DATA_PATH, im_name))
+            axes[axis_idx, index].imshow(this_im)
+            axes[axis_idx, index].set_title(titl, fontsize=20)
+
+        # Turn off all axes
+        for idx in range(4):
+            for jdx in range(perts_per_id): 
+                axes[idx, jdx].axis('off')
+        
+        plt.show()
 
 
-# Plot some troubling identities
-
-
+import pdb; pdb.set_trace()
 
 
 
