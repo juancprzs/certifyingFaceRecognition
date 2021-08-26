@@ -264,7 +264,6 @@ where_wrong = preds != targets
 counts, _, _ = plt.hist(targets[where_wrong].numpy(), 
     range=(0, embs.size(0)-1), bins=embs.size(0))
 plt.close()
-
 if PLOT:
     counts, _, _ = plt.hist(targets[where_wrong].numpy(), 
         range=(0, embs.size(0)-1), bins=embs.size(0))
@@ -357,10 +356,6 @@ if PLOT:
 
 
 import pdb; pdb.set_trace()
-
-
-
-
 from sklearn.cluster import KMeans
 kmeans = KMeans(n_clusters=5_000, random_state=0).fit(embs.detach().numpy())
 print(kmeans.labels_)
