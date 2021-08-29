@@ -1,6 +1,5 @@
 import cv2
 import torch
-import random
 import numpy as np
 import pandas as pd
 import os.path as osp
@@ -24,7 +23,7 @@ from facenet_pytorch import InceptionResnetV1
 from utils.logger import setup_logger
 from models.mod_stylegan_generator import ModStyleGANGenerator
 from proj_utils import (get_projection_matrices, sample_ellipsoid,
-    project_to_region_pytorch)
+    project_to_region_pytorch, set_seed)
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -32,14 +31,6 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 cudnn.benchmark = False
 cudnn.deterministic = True
 # torch.autograd.set_detect_anomaly(True)
-
-
-def set_seed(device, seed=111):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if device == 'cuda':
-        torch.cuda.manual_seed_all(seed)
 
 
 # Constants
@@ -74,7 +65,6 @@ ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE)
 assert METHOD in FRS_METHODS
 assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
 assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
-
 
 set_seed(DEVICE, seed=2)
 # The model and the latent codes
@@ -197,10 +187,11 @@ def get_embs(net, dataloader, original=True, to_cpu=True):
             embs.append(out.detach().cpu())
         else:
             embs.append(out)
-        # if idx == 10: break # REMOVE THIS!!
+        
+        if idx == 10: break # REMOVE THIS!!
     
     embs = torch.cat(embs, dim=0)
-    assert (len(embs.shape) == 2) and (embs.shape[1] == EMB_SIZE) and \
+    assert (len(embs.shape) == 2) and (embs.shape[1] == EMB_SIZE) # and \
         # (embs.shape[0] == len(dataloader.dataset)) # REMOVE THIS!!
     
     return embs, others
@@ -222,7 +213,7 @@ def compute_embs(net, original=False, dataset=None, with_grad=False):
                 for k in dataset.class_to_idx.keys() }
     
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, 
-        num_workers=1)
+        num_workers=0)
     if with_grad:
         embs = get_embs(net, dataloader, original=original, to_cpu=False)
     else:
@@ -241,10 +232,14 @@ def lat2embs(net, lat_codes, few=False):
     # Resize images
     ims = F.interpolate(ims, size=(IMG_SIZE, IMG_SIZE), mode='bilinear')
 
+    # Map from 0->255 to 0.->1.
+    ims = ims / 255.
+
     # Normalize images
     num_dims = len(ims.shape)
     std = torch.tensor(STD).reshape(num_dims * (1,)).to(ims.device)
     mean = torch.tensor(MEAN).reshape(num_dims * (1,)).to(ims.device)
+    ims = (ims - mean) / std
 
     # Forward through network
     local_dataset = TensorDataset(ims, torch.empty(ims.size(0))) # 2arg=whatever

@@ -90,7 +90,7 @@ def main():
     for key, val in outputs.items():
       if key == 'image':
         for image in val:
-          save_path = os.path.join(args.output_dir, f'{pbar.n:06d}.jpg')
+          save_path = os.path.join(args.output_dir, f'{pbar.n:06d}.png')
           cv2.imwrite(save_path, image[:, :, ::-1])
           pbar.update(1)
       else:

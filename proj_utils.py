@@ -1,6 +1,7 @@
 import sys
 import scipy
 import torch
+import random
 import numpy as np
 from glob import glob
 import os.path as osp
@@ -22,6 +23,14 @@ ATTRS['smile'] =  0.8
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = False
 cudnn.deterministic = True
+
+def set_seed(device, seed=111):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if device == 'cuda':
+        torch.cuda.manual_seed_all(seed)
+
 
 def sq_distance(A, shifted):
     if isinstance(A, torch.Tensor):
@@ -360,6 +369,7 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
     dirs: matrix of vectors establishing directions of interest (d x n2)
     '''
     # Project to space spanned by dirs
+    vs = vs.T
     proj_subs = proj_mat @ vs # Project vector to subspace
     if on_surface:
         dists = sq_distance(ellipse_mat, np.expand_dims(proj_subs.T, axis=2))
@@ -384,7 +394,7 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         assert np.allclose(ellps_dist[ellps_dist > 1.], 1), \
             'Some points outside ellipsoid!'
     
-    return proj_ell, proj_subs
+    return proj_ell.T, proj_subs.T
 
 
 def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None, 

@@ -11,7 +11,7 @@ distribution. Instead, please use `generate_data.py` to get the latent vectors
 from W or W+ space first, and then use `--input_latent_codes_path` option to
 pass in the latent vectors.
 """
-
+import torch
 import os.path
 import argparse
 import cv2
@@ -26,7 +26,7 @@ from utils.manipulator import linear_interpolate
 
 # Local imports
 import os.path as osp
-from proj_utils import (get_projection_matrices, sample_ellipsoid,
+from proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
   project_to_region, DATASETS, GAN_NAMES, ATTRS)
 
 def parse_args():
@@ -59,6 +59,10 @@ def parse_args():
                       help='Sample from surface of hyper-ellipsoid of interest')
 
   return parser.parse_args()
+
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+set_seed(DEVICE, seed=2)
 
 
 def main():
@@ -115,7 +119,7 @@ def main():
     class_path = osp.join(args.output_dir, 'data', f'class_{sample_id:03d}')
     os.makedirs(class_path)
     # # # #                       To here
-    new_codes = latent_codes[sample_id:sample_id + 1] + deltas
+    new_codes = latent_codes[sample_id:sample_id + 1] + deltas.T
     interpolation_id = 0
     for interpolations_batch in model.get_batch_inputs(new_codes):
       if gan_type == 'pggan':
@@ -124,7 +128,7 @@ def main():
         outputs = model.easy_synthesize(interpolations_batch, **kwargs)
       
       for image in outputs['image']:
-        save_path = osp.join(class_path, f'{interpolation_id:03d}.jpg')
+        save_path = osp.join(class_path, f'{interpolation_id:03d}.png')
         cv2.imwrite(save_path, image[:, :, ::-1])
         interpolation_id += 1
     assert interpolation_id == args.samples
