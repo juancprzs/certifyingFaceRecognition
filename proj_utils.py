@@ -24,18 +24,15 @@ cudnn.benchmark = False
 cudnn.deterministic = True
 
 def sq_distance(A, shifted):
-    transp = np.transpose(shifted, (0, 2, 1))
-    temp = np.matmul(A, shifted)
-    result = np.matmul(transp, temp)
-    return result.reshape(-1)
-
-
-def sq_distance_pytorch(A, shifted):
-    transp = shifted.permute(0, 2, 1).contiguous()
-    # temp = torch.matmul(A, shifted)
-    temp = torch.bmm(A.repeat(shifted.size(0), 1, 1), shifted)
-    # result = torch.matmul(transp, temp)
-    result = torch.bmm(transp, temp)
+    if isinstance(A, torch.Tensor):
+        transp = shifted.permute(0, 2, 1).contiguous()
+        temp = torch.bmm(A.repeat(shifted.size(0), 1, 1), shifted)
+        result = torch.bmm(transp, temp)
+    else:
+        transp = np.transpose(shifted, (0, 2, 1))
+        temp = np.matmul(A, shifted)
+        result = np.matmul(transp, temp)
+    
     return result.reshape(-1)
 
 
@@ -124,7 +121,7 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
         def fun(t, vec):
             inv = torch.linalg.inv(torch.eye(A.shape[0], device=A.device) + t*A)
             inter = torch.matmul(inv, torch.matmul(A, inv))
-            return sq_distance_pytorch(inter, vec) - 1
+            return sq_distance(inter, vec) - 1
         
         bracket = [np.finfo(float).eps, 1e3]
         solutions = []
@@ -154,7 +151,7 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
     shifted = y - mu
 
     # Check y that are outside region and extract them, then project those
-    sq_dist = sq_distance_pytorch(sc_A, shifted)
+    sq_dist = sq_distance(sc_A, shifted)
     which_out = sq_dist > 1
     extracted = shifted[which_out]
 
@@ -168,7 +165,7 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
     shifted[which_out] = projections
 
     # Compute new distances
-    sq_dist = sq_distance_pytorch(sc_A, shifted)
+    sq_dist = sq_distance(sc_A, shifted)
     result = shifted + mu
     if result.shape[0] == 1: # Has batch dim == 1
         result = torch.squeeze(result, dim=0)
@@ -294,16 +291,29 @@ def sample_ellipsoid(ellipsoid_mat, n_vecs=1):
     # 'vec' will be uniformly distributed over the surface of the n-ball
     # i.e. uniformly over the (n-1)-sphere
     # From normal distribution and normalize
-    vec = np.random.randn(n, n_vecs)
-    vec /= np.linalg.norm(vec, axis=0)
-    # 'vec' provides uniformly distributed directions -> Now need radius
-    # Sample uniform radius and then scale according to dimension of ball
-    rad = np.random.rand(n_vecs) ** (1/n)
-    vec *= rad
-    # Deform to get ellipsoid
-    # Get Cholesky decomp: np.allclose(chol @ chol.T, ellipsoid_mat) is True
-    chol = np.linalg.cholesky(ellipsoid_mat)
-    transform = np.linalg.inv(chol.T) # To map from ball to ellipse
+    if isinstance(ellipsoid_mat, torch.Tensor):
+        vec = torch.randn(n, n_vecs, device=ellipsoid_mat.device)
+        vec /= torch.norm(vec, dim=0)
+        # 'vec' provides uniformly distributed directions -> Now need radius
+        # Sample uniform radius and then scale according to dimension of ball
+        rad = torch.rand(n_vecs, device=ellipsoid_mat.device) ** (1/n)
+        vec *= rad
+        # Deform to get ellipsoid
+        # Get Cholesky decomp: np.allclose(chol @ chol.T, ellipsoid_mat) is True
+        chol = torch.linalg.cholesky(ellipsoid_mat)
+        transform = torch.linalg.inv(chol.T) # To map from ball to ellipse
+    else:
+        vec = np.random.randn(n, n_vecs)
+        vec /= np.linalg.norm(vec, axis=0)
+        # 'vec' provides uniformly distributed directions -> Now need radius
+        # Sample uniform radius and then scale according to dimension of ball
+        rad = np.random.rand(n_vecs) ** (1/n)
+        vec *= rad
+        # Deform to get ellipsoid
+        # Get Cholesky decomp: np.allclose(chol @ chol.T, ellipsoid_mat) is True
+        chol = np.linalg.cholesky(ellipsoid_mat)
+        transform = np.linalg.inv(chol.T) # To map from ball to ellipse
+    
     transformed = transform @ vec # Map them
     return transformed
 
@@ -391,7 +401,7 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
     vs = vs.T
     proj_subs = proj_mat @ vs # Project vector to subspace
     if on_surface:
-        dists = sq_distance_pytorch(
+        dists = sq_distance(
             ellipse_mat, torch.unsqueeze(proj_subs.T, dim=2)
         ).reshape(1, -1)
         sqrt_dist = torch.sqrt(dists)
@@ -410,7 +420,7 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         assert torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-5), \
             'Points inside ellipse should also be on the subspace'
         # Check for ellipse
-        ellps_dist = sq_distance_pytorch(
+        ellps_dist = sq_distance(
             ellipse_mat, torch.unsqueeze(proj_ell.T, dim=2)
         )
         assert torch.allclose(ellps_dist[ellps_dist > 1.], torch.tensor(1.)), \

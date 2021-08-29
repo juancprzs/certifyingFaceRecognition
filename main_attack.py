@@ -237,7 +237,7 @@ def from_latent_to_embs(lat_codes, few=False):
     mean = torch.tensor(MEAN).reshape(num_dims * (1,)).to(ims.device)
 
     # Forward through network
-    local_dataset = TensorDataset(ims, torch.zeros(ims.size(0))) # 2arg=whatever
+    local_dataset = TensorDataset(ims, torch.empty(ims.size(0))) # 2arg=whatever
     embs, _ = compute_embs(net, original=False, dataset=local_dataset, 
         with_grad=few)
     return embs
@@ -299,7 +299,8 @@ min_vals = orig_dists_copy.min(axis=0) # Minimum without considering diagonal
 NUM = 5
 some_codes = LAT_CODES[:NUM]
 some_codes.requires_grad = True
-find_adversaries(some_codes.to(DEVICE), orig_labels[:NUM], random_init=False)
+deltas = find_adversaries(some_codes.to(DEVICE), orig_labels[:NUM], 
+    random_init=True)
 
 loss = local_embs.mean()
 loss.backward()
