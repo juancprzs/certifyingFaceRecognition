@@ -1,5 +1,6 @@
 import sys
 import scipy
+import torch
 import numpy as np
 from glob import glob
 import os.path as osp
@@ -17,10 +18,24 @@ ATTRS['gender'] = 0.2
 ATTRS['pose'] =   0.5
 ATTRS['smile'] =  0.8
 
+# For deterministic behavior
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = False
+cudnn.deterministic = True
 
 def sq_distance(A, shifted):
     transp = np.transpose(shifted, (0, 2, 1))
-    result = np.squeeze(np.matmul(transp, np.matmul(A, shifted)))
+    temp = np.matmul(A, shifted)
+    result = np.matmul(transp, temp)
+    return result.reshape(-1)
+
+
+def sq_distance_pytorch(A, shifted):
+    transp = shifted.permute(0, 2, 1).contiguous()
+    # temp = torch.matmul(A, shifted)
+    temp = torch.bmm(A.repeat(shifted.size(0), 1, 1), shifted)
+    # result = torch.matmul(transp, temp)
+    result = torch.bmm(transp, temp)
     return result.reshape(-1)
 
 
@@ -89,6 +104,82 @@ def proj_ellipse(y, A, mu=None, c=1):
         result = np.squeeze(result, axis=0)
     else: # Has batch dim > 1
         result = np.squeeze(result, axis=2).T
+    
+    return result, t, sq_dist <= 1
+
+
+def proj_ellipse_pytorch(y, A, mu=None, c=1):
+    """ 
+        A: matrix defining ellipse (precision mat, i.e. inverse of cov mat)
+            -- ellipse: X.T @ A @ X = 1
+        mu : mean vector
+        c: level set
+        y: vector to be projected
+
+        Example:
+        points = np.random.uniform(low=-2, high=2, size=(SAMPLES, 2, 1)) + mu
+        projs, _, _ = proj_ellipse(y, A)
+    """
+    def solve(A, shifted):
+        def fun(t, vec):
+            inv = torch.linalg.inv(torch.eye(A.shape[0], device=A.device) + t*A)
+            inter = torch.matmul(inv, torch.matmul(A, inv))
+            return sq_distance_pytorch(inter, vec) - 1
+        
+        bracket = [np.finfo(float).eps, 1e3]
+        solutions = []
+        print(f'#{shifted.shape[0]} vectors')
+        for idx in range(shifted.shape[0]):
+            f = lambda t: fun(t, shifted[idx].reshape(1, -1, 1))
+            eval1, eval2 = f(bracket[0]).item(), f(bracket[1]).item()
+            print(f'Evaluations: {eval1:4.3f}, {eval2:4.3f}')
+            if eval1 * eval2 > 0: import pdb; pdb.set_trace()
+            temp = torch.randn_like(shifted)
+            gpu = sq_distance_pytorch(A, temp[0:1]) - sq_distance_pytorch(A, temp)[0]
+            cpu = sq_distance_pytorch(A.cpu(), temp[0:1].cpu()) - sq_distance_pytorch(A.cpu(), temp.cpu())[0]
+            solution = root_scalar(f, method='bisect', bracket=bracket)
+            solutions.append(solution.root)
+        
+        return torch.tensor(solutions, device=A.device).reshape(-1, 1)
+
+    if mu is None:
+        mu = torch.zeros((y.shape[0], 1), device=y.device)
+    # Assertions
+    assert len(mu.shape) == 2 and mu.shape[1] == 1, 'mu must be column vector'
+    assert y.shape[-2] == mu.shape[-2], \
+        'y should be a stack of vectors of the same dim as mu'
+
+    # Reshapes
+    mu = mu.reshape(1, -1, 1) # Add batch dim
+    if len(y.shape) == 2: # Conditionally add batch dim
+        n_dims, n_vecs = y.shape
+        y = y.T.reshape(n_vecs, n_dims, 1)
+    
+    # Scale matrix and shift vector
+    sc_A = A / c
+    shifted = y - mu
+
+    # Check y that are outside region and extract them, then project those
+    sq_dist = sq_distance_pytorch(sc_A, shifted)
+    which_out = sq_dist > 1
+    extracted = shifted[which_out]
+
+    # Find scalar t's
+    t = solve(sc_A, extracted)
+
+    # Project with the t's that were found
+    mat = torch.unsqueeze(t, 2) * torch.unsqueeze(sc_A, 0)
+    mat = mat + torch.unsqueeze(torch.eye(sc_A.shape[0], device=A.device), 0)
+    projections = torch.linalg.solve(mat, extracted)
+    shifted[which_out] = projections
+
+    # Compute new distances
+    sq_dist = sq_distance_pytorch(sc_A, shifted)
+    result = shifted + mu
+    if result.shape[0] == 1: # Has batch dim == 1
+        result = torch.squeeze(result, dim=0)
+    else: # Has batch dim > 1
+        result = torch.squeeze(result, dim=2).T
     
     return result, t, sq_dist <= 1
 
@@ -280,6 +371,8 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         proj_subs2 = dirs @ np.linalg.pinv(dirs) @ vs
         assert np.allclose(proj_subs, proj_subs2), 'Projection to subspace is '\
             'wrong'
+        assert np.allclose(proj_mat @ proj_ell, proj_ell), 'Points inside '\
+            'ellipse should also be on the subspace'
         # Check for ellipse
         ellps_dist = sq_distance(
             ellipse_mat, np.expand_dims(proj_ell.T, axis=2)
@@ -288,6 +381,48 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
             'Some points outside ellipsoid!'
     
     return proj_ell, proj_subs
+
+
+def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None, 
+        on_surface=False):
+    '''
+    vs: vectors to project (d x n1)
+    proj_mat: matrix to project vectors to subspace spanned by directions (cols 
+        of 'dirs')
+    ellipse_mat: matrix parameterizing the hyper-ellipsoid (d x d)
+    check: boolean stating whether projections are to be checked
+    dirs: matrix of vectors establishing directions of interest (d x n2)
+    '''
+    # Project to space spanned by dirs
+    vs = vs.T
+    proj_subs = proj_mat @ vs # Project vector to subspace
+    if on_surface:
+        dists = sq_distance_pytorch(
+            ellipse_mat, torch.unsqueeze(proj_subs.T, dim=2)
+        ).reshape(1, -1)
+        sqrt_dist = torch.sqrt(dists)
+        whr_vld = (sqrt_dist > 0).squeeze() # Where division is valid
+        proj_subs[:, whr_vld] = proj_subs[:, whr_vld] / (sqrt_dist[:, whr_vld] + 1e-6)
+    
+    # The projection of query vector onto the ellipse
+    proj_ell, _, _ = proj_ellipse_pytorch(proj_subs, ellipse_mat)
+
+    if check:
+        assert dirs is not None, \
+            "Must provide 'dirs' if want to check projection"
+        # Check for subspace
+        assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
+            'Projection to subspace is wrong'
+        assert torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-5), \
+            'Points inside ellipse should also be on the subspace'
+        # Check for ellipse
+        ellps_dist = sq_distance_pytorch(
+            ellipse_mat, torch.unsqueeze(proj_ell.T, dim=2)
+        )
+        assert torch.allclose(ellps_dist[ellps_dist > 1.], torch.tensor(1.)), \
+            'Some points outside ellipsoid!'
+    
+    return proj_ell.T, proj_subs.T
 
 
 def get_normal_and_check(P, proj_ell, proj_pla, ellipse_mat):

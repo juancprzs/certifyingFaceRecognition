@@ -26,7 +26,7 @@ from utils.manipulator import linear_interpolate
 
 # Local imports
 import os.path as osp
-from proj_utils import (get_projection_matrices, sample_ellipsoid, sq_distance,
+from proj_utils import (get_projection_matrices, sample_ellipsoid,
   project_to_region, DATASETS, GAN_NAMES, ATTRS)
 
 def parse_args():

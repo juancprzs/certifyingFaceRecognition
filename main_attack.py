@@ -1,5 +1,6 @@
 import cv2
 import torch
+import random
 import numpy as np
 import pandas as pd
 import os.path as osp
@@ -8,7 +9,10 @@ from glob import glob
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+# Torch imports
 import torch.nn.functional as F
+from torch.optim import SGD, Adam
+import torch.backends.cudnn as cudnn
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import InterpolationMode
 from torch.utils.data import DataLoader, Dataset, TensorDataset
@@ -19,33 +23,60 @@ from facenet_pytorch import InceptionResnetV1
 # Local imports
 from utils.logger import setup_logger
 from models.mod_stylegan_generator import ModStyleGANGenerator
+from proj_utils import (get_projection_matrices, sample_ellipsoid,
+    project_to_region_pytorch)
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+# For deterministic behavior
+cudnn.benchmark = False
+cudnn.deterministic = True
+# torch.autograd.set_detect_anomaly(True)
+
+
+def set_seed(device, seed=111):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if device == 'cuda':
+        torch.cuda.manual_seed_all(seed)
+
 
 # Constants
+STD = 0.5
+MEAN = 0.5
 PLOT = False
 EMB_SIZE = 512
 LAT_SPACE = 'w'
 BATCH_SIZE = 32
 N_SHOW_ERRS = 5
+DATASET = 'ffhq'
+GAN_NAME = 'stylegan'
 METHOD = 'insightface'
 OUTPUT_DIR = 'remove_soon'
 FRS_METHODS = ['insightface', 'facenet']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
-ORIG_IMAGES_PATH = 'data/stylegan_ffhq_recog_debug'
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
-DATA_PATH = 'results/stylegan_ffhq_recog_debug_perts/data'
+ORIG_IMAGES_PATH = f'data/{GAN_NAME}_{DATASET}_recog_debug'
+DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_debug_perts/data'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 TRANSFORM = Compose([
     Resize(size=(IMG_SIZE, IMG_SIZE), 
         interpolation=InterpolationMode.BILINEAR), # cv2's default
     ToTensor(),
-    Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    Normalize((MEAN, MEAN, MEAN), (STD, STD, STD))
 ])
+PROJ_MAT, ELLIPSE_MAT, DIRS, _ = get_projection_matrices(dataset=DATASET, 
+    gan_name=GAN_NAME)
+DIRS = torch.tensor(DIRS, dtype=torch.float32, device=DEVICE)
+PROJ_MAT = torch.tensor(PROJ_MAT, dtype=torch.float32, device=DEVICE)
+ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE) 
 assert METHOD in FRS_METHODS
+assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
+assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
 
 
+set_seed(DEVICE, seed=2)
 # The model and the latent codes
 LOGGER = setup_logger(OUTPUT_DIR, logger_name='generate_data')
 LOGGER.info(f'Initializing generator.')
@@ -87,7 +118,7 @@ def get_net(method='insightface'):
     return net.to(DEVICE).eval()
 
 
-def get_embs(dataloader, original=True):
+def get_embs(dataloader, original=True, to_cpu=True):
     
     def check_ims(names):
         curr_nums = [int(x.replace('.jpg', '')) for x in names]
@@ -97,22 +128,23 @@ def get_embs(dataloader, original=True):
             'Something wrong with loading the original images'
     
     embs, others = [], []
-    for idx, (imgs, other) in enumerate(tqdm(dataloader)):
+    for idx, (imgs, other) in enumerate(dataloader):
         if original: # The dataset returns image names, i.e. names = other
             # Check everything is ok
             check_ims(other)
 
         others.extend(other)
         # Get embeddings and store
-        with torch.no_grad():
-            out = net(imgs.to(DEVICE))
-        
-        embs.append(out.detach().cpu())
+        out = net(imgs.to(DEVICE))
+        if to_cpu:
+            embs.append(out.detach().cpu())
+        else:
+            embs.append(out)
+        if idx == 10: break # REMOVE THIS!!
     
     embs = torch.cat(embs, dim=0)
-    assert (len(embs.shape) == 2) and \
-        (embs.shape[0] == len(dataloader.dataset)) and \
-        (embs.shape[1] == EMB_SIZE)
+    assert (len(embs.shape) == 2) and (embs.shape[1] == EMB_SIZE) \
+        # (embs.shape[0] == len(dataloader.dataset)) and \ # REMOVE THIS!!
     
     return embs, others
 
@@ -137,7 +169,7 @@ class ImageFolderWithPaths(ImageFolder):
         return (original_tuple[0], path)
 
 
-def compute_embs(net, original=False, dataset=None):
+def compute_embs(net, original=False, dataset=None, with_grad=False):
     if dataset is None:
         if original:
             print('Computing ORIGINAL embeddings')
@@ -147,14 +179,20 @@ def compute_embs(net, original=False, dataset=None):
             dataset = ImageFolderWithPaths(root=DATA_PATH, transform=TRANSFORM)
             # ImageFolder will have, possibly, screwed up the mapping from class 
             # name to idx. Like: dataset.class_to_idx can be
-            # {'class_552': 4552, 'class_553': 4553, 'class_554': 4554} instead of 
-            # the obvious. We correct for this here:
+            # {'class_552': 4552, 'class_553': 4553, 'class_554': 4554} instead 
+            # of the obvious. We correct for this here:
             dataset.class_to_idx = { k : int(k.split('_')[1]) 
                 for k in dataset.class_to_idx.keys() }
     
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, 
         num_workers=0)
-    return get_embs(dataloader, original=original)
+    if with_grad:
+        embs = get_embs(dataloader, original=original, to_cpu=False)
+    else:
+        with torch.no_grad():
+            embs = get_embs(dataloader, original=original, to_cpu=True)
+
+    return embs
 
 
 class SimpleDataset(Dataset):
@@ -185,19 +223,69 @@ def get_dists(embs1, embs2, method='insightface'):
         return 1 - torch.matmul(embs1, embs2.T)
 
 
+def from_latent_to_embs(lat_codes, few=False):
+    ims = get_images_from_latent(lat_codes)
+    if not few:
+        ims = ims.cpu()
+    
+    # Resize images
+    ims = F.interpolate(ims, size=(IMG_SIZE, IMG_SIZE), mode='bilinear')
+
+    # Normalize images
+    num_dims = len(ims.shape)
+    std = torch.tensor(STD).reshape(num_dims * (1,)).to(ims.device)
+    mean = torch.tensor(MEAN).reshape(num_dims * (1,)).to(ims.device)
+
+    # Forward through network
+    local_dataset = TensorDataset(ims, torch.zeros(ims.size(0))) # 2arg=whatever
+    embs, _ = compute_embs(net, original=False, dataset=local_dataset, 
+        with_grad=few)
+    return embs
+
+
+def get_optim(deltas, optim_name='SGD',lr=0.001, momentum=0.9):
+    if optim_name == 'SGD':
+        optim = SGD([deltas], lr=lr, momentum=0.9)
+    elif optim_name == 'Adam':
+        optim = Adam([deltas], lr=lr)
+
+    return optim
+
+
+def find_adversaries(lat_codes, labels, iters=100, random_init=False, 
+        on_surface=True):
+    # Initialize deltas
+    if random_init:
+        # Sample from ellipsoid and project
+        deltas = sample_ellipsoid(ELLIPSE_MAT, n_vecs=lat_codes.size(0))
+        deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, 
+            ELLIPSE_MAT, check=True, dirs=DIRS, on_surface=on_surface)
+        # Transform to tensor
+        deltas = torch.tensor(deltas.T, requires_grad=True)
+    else:
+        deltas = torch.zeros_like(lat_codes, requires_grad=True)
+    
+    # Their corresponding optimizer
+    optim = get_optim(deltas, optim_name='Adam')
+    for idx_iter in range(iters):
+        print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
+        embs = from_latent_to_embs(lat_codes + deltas, few=True)
+        loss = embs.mean()
+        # Backward and optim step
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+        # Projection
+        proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
+            check=True, dirs=DIRS, on_surface=on_surface)
+        deltas = proj.detach()
+
+
+    return deltas
+
+
 # DNN
 net = get_net(method=METHOD)
-
-# ------------------------------------------------------------------------------
-some_codes = LAT_CODES[:11]
-some_codes.requires_grad = True
-ims = get_images_from_latent(some_codes).to('cpu')
-ims2 = F.interpolate(ims, size=(IMG_SIZE, IMG_SIZE), mode='bilinear')
-local_dataset = TensorDataset(ims2, torch.zeros(ims2.size(0)))
-local_embs, _ = compute_embs(net, original=False, dataset=local_dataset)
-import pdb; pdb.set_trace()
-# ------------------------------------------------------------------------------
-
 # # # # # Embeddings of the original images
 embs, im_names = compute_embs(net, original=True)
 orig_labels = torch.tensor([int(x.replace('.jpg','')) for x in im_names])
@@ -206,6 +294,18 @@ orig_dists = get_dists(embs, embs, method=METHOD)
 orig_dists_copy = orig_dists.numpy().copy()
 orig_dists_copy[np.eye(orig_dists_copy.shape[0], dtype=bool)] = +float('inf')
 min_vals = orig_dists_copy.min(axis=0) # Minimum without considering diagonal
+
+# ------------------------------------------------------------------------------
+NUM = 5
+some_codes = LAT_CODES[:NUM]
+some_codes.requires_grad = True
+find_adversaries(some_codes.to(DEVICE), orig_labels[:NUM], random_init=False)
+
+loss = local_embs.mean()
+loss.backward()
+
+print('lat codes grad: ', some_codes.grad)
+# ------------------------------------------------------------------------------
 
 if PLOT:
     plt.hist(min_vals, edgecolor='black', linewidth=1, bins=20)
@@ -220,6 +320,7 @@ if PLOT:
 new_embs, new_im_names = compute_embs(net, original=False)
 targets = torch.tensor([int(x.split('/')[0].split('_')[1]) 
     for x in new_im_names])
+
 
 # Perturbations per ID
 perts_per_id = new_embs.size(0) // embs.size(0)
