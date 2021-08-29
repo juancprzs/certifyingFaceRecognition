@@ -88,6 +88,47 @@ LAT_CODES = torch.from_numpy(
 )
 
 
+class SimpleDataset(Dataset):
+    def __init__(self, root, transform):
+        self.root = root
+        self.transform = transform
+        self.im_names = [osp.basename(x) for x in glob(osp.join(root, '*.jpg'))]
+        self.im_names = sorted(self.im_names, 
+            key=lambda x: int(x.replace('.jpg', '')))
+
+    def __len__(self):
+        return len(self.im_names)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx): idx = idx.tolist()
+
+        img_name = osp.join(self.root, osp.basename(self.im_names[idx]))
+        image = pil_loader(img_name)
+        if self.transform: image = self.transform(image)
+
+        return image, osp.basename(img_name)
+
+
+class ImageFolderWithPaths(ImageFolder):
+    # Taken from
+    # https://gist.github.com/andrewjong/6b02ff237533b3b2c554701fb53d5c4d
+    """
+    Custom dataset that includes image file paths. Extends
+    torchvision.datasets.ImageFolder
+    """
+
+    # override the __getitem__ method. this is the method that dataloader calls
+    def __getitem__(self, index):
+        # this is what ImageFolder normally returns 
+        original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
+        # the image file path
+        path = self.imgs[index][0]
+        # From YY/.../XX/data/class_000/000.jpg to class_000/000.jpg
+        path = osp.join(*path.split('/')[-2:])
+        # Return a new tuple
+        return (original_tuple[0], path)
+
+
 def get_images_from_latent(lat_codes):
     outputs = []
     for idx, batch in enumerate(MODEL.get_batch_inputs(lat_codes)):
@@ -118,7 +159,23 @@ def get_net(method='insightface'):
     return net.to(DEVICE).eval()
 
 
-def get_embs(dataloader, original=True, to_cpu=True):
+def get_optim(deltas, optim_name='SGD',lr=0.001, momentum=0.9):
+    if optim_name == 'SGD':
+        optim = SGD([deltas], lr=lr, momentum=0.9)
+    elif optim_name == 'Adam':
+        optim = Adam([deltas], lr=lr)
+
+    return optim
+
+
+def get_dists(embs1, embs2, method='insightface'):
+    if method == 'insightface':
+        return torch.cdist(embs1, embs2)
+    else:
+        return 1 - torch.matmul(embs1, embs2.T)
+
+
+def get_embs(net, dataloader, original=True, to_cpu=True):
     
     def check_ims(names):
         curr_nums = [int(x.replace('.jpg', '')) for x in names]
@@ -128,7 +185,7 @@ def get_embs(dataloader, original=True, to_cpu=True):
             'Something wrong with loading the original images'
     
     embs, others = [], []
-    for idx, (imgs, other) in enumerate(dataloader):
+    for idx, (imgs, other) in enumerate(tqdm(dataloader)):
         if original: # The dataset returns image names, i.e. names = other
             # Check everything is ok
             check_ims(other)
@@ -140,33 +197,13 @@ def get_embs(dataloader, original=True, to_cpu=True):
             embs.append(out.detach().cpu())
         else:
             embs.append(out)
-        if idx == 10: break # REMOVE THIS!!
+        # if idx == 10: break # REMOVE THIS!!
     
     embs = torch.cat(embs, dim=0)
-    assert (len(embs.shape) == 2) and (embs.shape[1] == EMB_SIZE) \
-        # (embs.shape[0] == len(dataloader.dataset)) and \ # REMOVE THIS!!
+    assert (len(embs.shape) == 2) and (embs.shape[1] == EMB_SIZE) and \
+        # (embs.shape[0] == len(dataloader.dataset)) # REMOVE THIS!!
     
     return embs, others
-
-
-class ImageFolderWithPaths(ImageFolder):
-    # Taken from
-    # https://gist.github.com/andrewjong/6b02ff237533b3b2c554701fb53d5c4d
-    """
-    Custom dataset that includes image file paths. Extends
-    torchvision.datasets.ImageFolder
-    """
-
-    # override the __getitem__ method. this is the method that dataloader calls
-    def __getitem__(self, index):
-        # this is what ImageFolder normally returns 
-        original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
-        # the image file path
-        path = self.imgs[index][0]
-        # From YY/.../XX/data/class_000/000.jpg to class_000/000.jpg
-        path = osp.join(*path.split('/')[-2:])
-        # Return a new tuple
-        return (original_tuple[0], path)
 
 
 def compute_embs(net, original=False, dataset=None, with_grad=False):
@@ -185,45 +222,18 @@ def compute_embs(net, original=False, dataset=None, with_grad=False):
                 for k in dataset.class_to_idx.keys() }
     
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, 
-        num_workers=0)
+        num_workers=1)
     if with_grad:
-        embs = get_embs(dataloader, original=original, to_cpu=False)
+        embs = get_embs(net, dataloader, original=original, to_cpu=False)
     else:
         with torch.no_grad():
-            embs = get_embs(dataloader, original=original, to_cpu=True)
+            embs = get_embs(net, dataloader, original=original, to_cpu=True)
 
     return embs
 
 
-class SimpleDataset(Dataset):
-    def __init__(self, root, transform):
-        self.root = root
-        self.transform = transform
-        self.im_names = [osp.basename(x) for x in glob(osp.join(root, '*.jpg'))]
-        self.im_names = sorted(self.im_names, 
-            key=lambda x: int(x.replace('.jpg', '')))
 
-    def __len__(self):
-        return len(self.im_names)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx): idx = idx.tolist()
-
-        img_name = osp.join(self.root, osp.basename(self.im_names[idx]))
-        image = pil_loader(img_name)
-        if self.transform: image = self.transform(image)
-
-        return image, osp.basename(img_name)
-
-
-def get_dists(embs1, embs2, method='insightface'):
-    if method == 'insightface':
-        return torch.cdist(embs1, embs2)
-    else:
-        return 1 - torch.matmul(embs1, embs2.T)
-
-
-def from_latent_to_embs(lat_codes, few=False):
+def lat2embs(net, lat_codes, few=False):
     ims = get_images_from_latent(lat_codes)
     if not few:
         ims = ims.cpu()
@@ -243,17 +253,8 @@ def from_latent_to_embs(lat_codes, few=False):
     return embs
 
 
-def get_optim(deltas, optim_name='SGD',lr=0.001, momentum=0.9):
-    if optim_name == 'SGD':
-        optim = SGD([deltas], lr=lr, momentum=0.9)
-    elif optim_name == 'Adam':
-        optim = Adam([deltas], lr=lr)
-
-    return optim
-
-
-def find_adversaries(lat_codes, labels, iters=100, random_init=False, 
-        on_surface=True):
+def find_adversaries(net, lat_codes, orig_embs, orig_labels, iters=10, 
+        random_init=False, on_surface=True):
     # Initialize deltas
     if random_init:
         # Sample from ellipsoid and project
@@ -261,7 +262,7 @@ def find_adversaries(lat_codes, labels, iters=100, random_init=False,
         deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, 
             ELLIPSE_MAT, check=True, dirs=DIRS, on_surface=on_surface)
         # Transform to tensor
-        deltas = torch.tensor(deltas.T, requires_grad=True)
+        deltas = deltas.clone().detach().requires_grad_(True)
     else:
         deltas = torch.zeros_like(lat_codes, requires_grad=True)
     
@@ -269,7 +270,8 @@ def find_adversaries(lat_codes, labels, iters=100, random_init=False,
     optim = get_optim(deltas, optim_name='Adam')
     for idx_iter in range(iters):
         print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
-        embs = from_latent_to_embs(lat_codes + deltas, few=True)
+        embs = lat2embs(net, lat_codes + deltas, few=True)
+        import pdb; pdb.set_trace()
         loss = embs.mean()
         # Backward and optim step
         optim.zero_grad()
@@ -277,7 +279,7 @@ def find_adversaries(lat_codes, labels, iters=100, random_init=False,
         optim.step()
         # Projection
         proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
-            check=True, dirs=DIRS, on_surface=on_surface)
+            check=True, dirs=DIRS, on_surface=False)
         deltas = proj.detach()
 
 
@@ -299,8 +301,8 @@ min_vals = orig_dists_copy.min(axis=0) # Minimum without considering diagonal
 NUM = 5
 some_codes = LAT_CODES[:NUM]
 some_codes.requires_grad = True
-deltas = find_adversaries(some_codes.to(DEVICE), orig_labels[:NUM], 
-    random_init=True)
+deltas = find_adversaries(net, some_codes.to(DEVICE), embs, orig_labels, 
+    random_init=False)
 
 loss = local_embs.mean()
 loss.backward()

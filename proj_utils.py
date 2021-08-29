@@ -315,7 +315,7 @@ def sample_ellipsoid(ellipsoid_mat, n_vecs=1):
         transform = np.linalg.inv(chol.T) # To map from ball to ellipse
     
     transformed = transform @ vec # Map them
-    return transformed
+    return transformed.T
 
 
 def mvee(points, tol=0.001):
@@ -406,10 +406,14 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         ).reshape(1, -1)
         sqrt_dist = torch.sqrt(dists)
         whr_vld = (sqrt_dist > 0).squeeze() # Where division is valid
-        proj_subs[:, whr_vld] = proj_subs[:, whr_vld] / (sqrt_dist[:, whr_vld] + 1e-6)
+        proj_subs[:, whr_vld] = proj_subs[:, whr_vld] / (sqrt_dist[:, whr_vld] + 1e-5)
     
     # The projection of query vector onto the ellipse
     proj_ell, _, _ = proj_ellipse_pytorch(proj_subs, ellipse_mat)
+    while not torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-6):
+        # The projection of query vector onto the ellipse
+        proj_ell, _, _ = proj_ellipse_pytorch(proj_subs, ellipse_mat)
+        proj_subs = proj_mat @ proj_ell # Project vector to subspace
 
     if check:
         assert dirs is not None, \
@@ -417,7 +421,7 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         # Check for subspace
         assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
             'Projection to subspace is wrong'
-        assert torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-5), \
+        assert torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-6), \
             'Points inside ellipse should also be on the subspace'
         # Check for ellipse
         ellps_dist = sq_distance(
