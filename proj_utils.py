@@ -128,15 +128,9 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
         
         bracket = [np.finfo(float).eps, 1e3]
         solutions = []
-        print(f'#{shifted.shape[0]} vectors')
         for idx in range(shifted.shape[0]):
             f = lambda t: fun(t, shifted[idx].reshape(1, -1, 1))
             eval1, eval2 = f(bracket[0]).item(), f(bracket[1]).item()
-            print(f'Evaluations: {eval1:4.3f}, {eval2:4.3f}')
-            if eval1 * eval2 > 0: import pdb; pdb.set_trace()
-            temp = torch.randn_like(shifted)
-            gpu = sq_distance_pytorch(A, temp[0:1]) - sq_distance_pytorch(A, temp)[0]
-            cpu = sq_distance_pytorch(A.cpu(), temp[0:1].cpu()) - sq_distance_pytorch(A.cpu(), temp.cpu())[0]
             solution = root_scalar(f, method='bisect', bracket=bracket)
             solutions.append(solution.root)
         
