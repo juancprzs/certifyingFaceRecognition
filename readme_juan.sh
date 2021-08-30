@@ -30,8 +30,9 @@ rm -rf $FF; CUDA_VISIBLE_DEVICES=0 python edit_constrained_perturbed.py \
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 # Generate new data for debugging the recognition model
-OUTDIR=data/stylegan_ffhq_recog_png
-NUM=5000; CUDA_VISIBLE_DEVICES=0 python generate_data.py \
+OUTDIR=data/stylegan_ffhq_recog_png;
+NUM=5000; 
+rm -rf $OUTDIR; CUDA_VISIBLE_DEVICES=0 python generate_data.py \
 -m stylegan_ffhq \
 -o "$OUTDIR" \
 -n "$NUM"
@@ -46,11 +47,4 @@ rm -rf $FF; CUDA_VISIBLE_DEVICES=0 python edit_constrained_perturbed.py \
 -s "$LAT" \
 -i "$OUTDIR"/"$LAT".npy \
 --sample_surface
-
-
-# Generate new data for testing the recognition model (10 times more data)
-NUM=50000; CUDA_VISIBLE_DEVICES=0 python generate_data.py \
--m stylegan_ffhq \
--o data/stylegan_ffhq_recog \
--n "$NUM"
 

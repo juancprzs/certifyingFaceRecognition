@@ -7,7 +7,7 @@ collection of images. These images can be used for further attribute prediction.
 In this way, it is able to build a relationship between input latent codes and
 the corresponding attribute scores.
 """
-
+import torch
 import os.path
 import argparse
 from collections import defaultdict
@@ -17,9 +17,13 @@ from tqdm import tqdm
 
 from models.model_settings import MODEL_POOL
 from models.pggan_generator import PGGANGenerator
-from models.stylegan_generator import StyleGANGenerator
+# from models.stylegan_generator import StyleGANGenerator
+from models.mod_stylegan_generator import ModStyleGANGenerator
+from proj_utils import set_seed
 from utils.logger import setup_logger
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+set_seed(DEVICE, seed=2)
 
 def parse_args():
   """Parses arguments."""
@@ -61,7 +65,7 @@ def main():
     model = PGGANGenerator(args.model_name, logger)
     kwargs = {}
   elif gan_type == 'stylegan':
-    model = StyleGANGenerator(args.model_name, logger)
+    model = ModStyleGANGenerator(args.model_name, logger)
     kwargs = {'latent_space_type': args.latent_space_type}
   else:
     raise NotImplementedError(f'Not implemented GAN type `{gan_type}`!')
@@ -91,7 +95,8 @@ def main():
       if key == 'image':
         for image in val:
           save_path = os.path.join(args.output_dir, f'{pbar.n:06d}.png')
-          cv2.imwrite(save_path, image[:, :, ::-1])
+          curr_image = image.cpu().detach().numpy().transpose(1, 2, 0)
+          cv2.imwrite(save_path, curr_image[:, :, ::-1])
           pbar.update(1)
       else:
         results[key].append(val)

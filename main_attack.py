@@ -41,6 +41,7 @@ EMB_SIZE = 512
 LAT_SPACE = 'w'
 BATCH_SIZE = 32
 N_SHOW_ERRS = 5
+IMAGE_EXT = 'png'
 DATASET = 'ffhq'
 GAN_NAME = 'stylegan'
 METHOD = 'insightface'
@@ -48,8 +49,8 @@ OUTPUT_DIR = 'remove_soon'
 FRS_METHODS = ['insightface', 'facenet']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
-ORIG_IMAGES_PATH = f'data/{GAN_NAME}_{DATASET}_recog_debug'
-DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_debug_perts/data'
+ORIG_IMAGES_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
+DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_png_perts/data'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 TRANSFORM = Compose([
     Resize(size=(IMG_SIZE, IMG_SIZE), 
@@ -82,9 +83,10 @@ class SimpleDataset(Dataset):
     def __init__(self, root, transform):
         self.root = root
         self.transform = transform
-        self.im_names = [osp.basename(x) for x in glob(osp.join(root, '*.jpg'))]
+        self.im_names = [osp.basename(x) 
+            for x in glob(osp.join(root, f'*.{IMAGE_EXT}'))]
         self.im_names = sorted(self.im_names, 
-            key=lambda x: int(x.replace('.jpg', '')))
+            key=lambda x: int(x.replace(f'.{IMAGE_EXT}', '')))
 
     def __len__(self):
         return len(self.im_names)
@@ -113,7 +115,7 @@ class ImageFolderWithPaths(ImageFolder):
         original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
         # the image file path
         path = self.imgs[index][0]
-        # From YY/.../XX/data/class_000/000.jpg to class_000/000.jpg
+        # From YY/.../XX/data/class_000/000.png to class_000/000.png
         path = osp.join(*path.split('/')[-2:])
         # Return a new tuple
         return (original_tuple[0], path)
@@ -168,7 +170,7 @@ def get_dists(embs1, embs2, method='insightface'):
 def get_embs(net, dataloader, original=True, to_cpu=True):
     
     def check_ims(names):
-        curr_nums = [int(x.replace('.jpg', '')) for x in names]
+        curr_nums = [int(x.replace(f'.{IMAGE_EXT}', '')) for x in names]
         expected_curr_num = range(idx*BATCH_SIZE, 
             idx*BATCH_SIZE+len(curr_nums))
         assert curr_nums == list(expected_curr_num), \
@@ -285,7 +287,8 @@ def find_adversaries(net, lat_codes, orig_embs, orig_labels, iters=10,
 net = get_net(method=METHOD)
 # # # # # Embeddings of the original images
 embs, im_names = compute_embs(net, original=True)
-orig_labels = torch.tensor([int(x.replace('.jpg','')) for x in im_names])
+orig_labels = torch.tensor([int(x.replace(f'.{IMAGE_EXT}','')) 
+    for x in im_names])
 orig_dists = get_dists(embs, embs, method=METHOD)
 # Get inter-cluster distances (i.e. between clusters)
 orig_dists_copy = orig_dists.numpy().copy()
@@ -411,7 +414,8 @@ if PLOT:
     for tr_id in troubling_ids[:N_SHOW_ERRS]:
         fig, axes = plt.subplots(nrows=4, ncols=perts_per_id)
         # The anchor image for this ID
-        orig_im_path = osp.join(ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + '.jpg')
+        orig_im_path = osp.join(
+            ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + f'.{IMAGE_EXT}')
         orig_im = mpimg.imread(orig_im_path)
         mid_axes = axes[0, perts_per_id//2]
         mid_axes.imshow(orig_im); mid_axes.set_title(f'{tr_id}', fontsize=20)
@@ -436,7 +440,7 @@ if PLOT:
                 # Load the anchor image
                 this_pred = row['pred']
                 anchor_im_path = osp.join(ORIG_IMAGES_PATH, 
-                    f'{this_pred}'.zfill(6) + '.jpg')
+                    f'{this_pred}'.zfill(6) + f'.{IMAGE_EXT}')
                 anchor_im = mpimg.imread(anchor_im_path)
                 axes[3, index].imshow(anchor_im)
                 axes[3, index].set_title(f'{this_pred}', fontsize=20)
