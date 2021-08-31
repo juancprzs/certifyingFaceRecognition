@@ -56,7 +56,7 @@ MOMENTUM = 0.9
 LOSS_TYPE = 'nearest'
 PROBABILITY_LOSS = False
 FRS_METHODS = ['insightface', 'facenet']
-LOSS_TYPES = ['away', 'nearest', 'diff']
+LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
 assert LOSS_TYPE in LOSS_TYPES
 
 # Paths
@@ -295,36 +295,59 @@ def get_pairwise_dists(embs1, embs2, method='insightface'):
         return 1 - dot
 
 
-def compute_loss(all_dists, labels, loss_type='away', use_probs=True):
-    vals = F.softmax(-all_dists, dim=1) if use_probs else all_dists
-    # Get value to target
-    val2target = torch.gather(vals, 1, labels.view(-1, 1))
-    # Get value to highest-performing class that *is not* the target
+def compute_loss(all_dists, labels, loss_type='away', use_probs=True, 
+        scale_dists=True):
+    if use_probs:
+        if scale_dists:
+            all_dists = all_dists / np.sqrt(EMB_SIZE)
+        vals = F.softmax(-all_dists, dim=1)
+    else:
+        vals = all_dists
+    
+    # -----------   Get val to target
+    target_val = torch.gather(vals, 1, labels.view(-1, 1))
+    # -----------   Get val to highest-performing class != target
     value = -1 if use_probs else float('inf')
     mod_vals = torch.scatter(vals, 1, labels.view(-1, 1), value)
+    if use_probs: # If they're probabilities, we are looking for the max
+        nearest_val, _ = torch.max(mod_vals, 1)
+    else: # If they're distances, we are looking for the min
+        nearest_val, _ = torch.min(mod_vals, 1)
+
+    # -----------   The losses themselves
+    # --> 'away' loss
     if loss_type == 'away':
-        # Get distance to target
-        dist2target = torch.gather(all_dists, 1, labels.view(-1, 1))
-        # We want to MAXIMIZE this distance
-        return -dist2target.mean()
-    elif loss_type == 'nearest':
-        # Replace distance to target with infinity -> won't count for minimum
-        all_dists_mod = torch.scatter(all_dists, 1, labels.view(-1, 1), 
-            float('inf'))
-        # Get the distance to the nearest embeddings that *is not* the target
-        dist2nearest, _ = torch.min(all_dists_mod, 1)
-        # We want to MINIMIZE this distance
-        return dist2nearest.mean()
-    elif loss_type == 'diff':
-        # Get distance to target
-        dist2target = torch.gather(all_dists, 1, labels.view(-1, 1))
-        # Replace distance to target with infinity -> won't count for minimum
-        all_dists_mod = torch.scatter(all_dists, 1, labels.view(-1, 1), 
-            float('inf'))
-        # Get the distance to the nearest embeddings that *is not* the target
-        dist2nearest, _ = torch.min(all_dists_mod, 1)
-        # We want to MINIMIZE this difference
-        return (dist2nearest - dist2target).mean()
+        if use_probs: # If it's a probability, we want to MINIMIZE it
+            coeff = +1.
+        else: # Otherwise we want to MAXIMIZE it
+            coeff = -1.
+        return coeff * target_val.mean()
+    # --> 'nearest' loss
+    if loss_type == 'nearest':
+        if use_probs: # If it's a probability, we want to MAXIMIZE it
+            coeff = -1.
+        else: # Otherwise we want to MAXIMIZE it
+            coeff = +1.
+        return coeff * nearest_val.mean()
+    # --> 'diff' loss
+    if loss_type == 'diff':
+        diff = target_val - nearest_val
+        if use_probs: # If it's a probability, we want to MINIMIZE it
+            coeff = +1.
+        else: # Otherwise we want to MAXIMIZE it
+            coeff = -1.
+        return coeff * diff.mean()
+    # --> 'xent' loss
+    if loss_type == 'xent':
+        assert use_probs, 'xent loss should be used together with probs'
+        if scale_dists:
+            scores = -all_dists / np.sqrt(EMB_SIZE)
+        else:
+            scores = -all_dists
+        xent = F.cross_entropy(input=scores, target=labels, 
+            reduction='none')
+        # It's the cross-entropy loss, so we want to maximize it
+        return -1. * xent.mean()
 
 
 def find_adversaries(net, lat_codes, labels, orig_embs, iters=10, 
