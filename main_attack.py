@@ -42,14 +42,17 @@ EMB_SIZE = 512
 LAT_SPACE = 'w'
 BATCH_SIZE = 32
 N_SHOW_ERRS = 5
-IMAGE_EXT = 'png'
 DATASET = 'ffhq'
+IMAGE_EXT = 'png'
+LOSS_TYPE = 'nearest'
 GAN_NAME = 'stylegan'
 METHOD = 'insightface'
 OUTPUT_DIR = 'remove_soon'
 DEVICE = torch.device('cuda')
 FRS_METHODS = ['insightface', 'facenet']
+LOSS_TYPES = ['away', 'nearest', 'cross-ent']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
+assert LOSS_TYPE in LOSS_TYPES
 
 # Paths
 ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
@@ -184,7 +187,7 @@ def get_net(method='insightface'):
 
 def get_optim(deltas, optim_name='SGD', lr=0.001, momentum=0.9):
     if optim_name == 'SGD':
-        optim = SGD([deltas], lr=lr, momentum=0.9)
+        optim = SGD([deltas], lr=lr, momentum=momentum)
     elif optim_name == 'Adam':
         optim = Adam([deltas], lr=lr)
 
@@ -287,7 +290,25 @@ def get_pairwise_dists(embs1, embs2, method='insightface'):
         return 1 - dot
 
 
-def find_adversaries(net, lat_codes, labels, orig_embs, iters=100, 
+def compute_loss(all_dists, labels, loss_type='away'):
+    if loss_type == 'away':
+        # Check distance to the target
+        dist2target = torch.gather(all_dists, 1, labels.view(-1, 1))
+        # We want to MAXIMIZE this distance
+        return -dist2target.mean()
+    elif loss_type == 'nearest':
+        # Replace distance to target with infinity -> won't count for minimum
+        all_dists_mod = torch.scatter(all_dists, 1, labels.view(-1, 1), 
+            float('inf'))
+        # Get the distance to the nearest embeddings that *is not* the target
+        dist2nearest, _ = torch.min(all_dists_mod, 1)
+        # We want to MINIMIZE this distance
+        return dist2nearest.mean()
+    elif loss_type == 'cross-ent':
+        return None
+
+
+def find_adversaries(net, lat_codes, labels, orig_embs, iters=10, 
         random_init=True, rand_init_on_surf=True):
     # Initialize deltas
     if random_init:
@@ -301,48 +322,54 @@ def find_adversaries(net, lat_codes, labels, orig_embs, iters=100,
         deltas = torch.zeros_like(lat_codes, requires_grad=True)
     
     # Their corresponding optimizer
-    optim = get_optim(deltas, optim_name='Adam')
+    optim = get_optim(deltas, optim_name='SGD')
     for idx_iter in range(iters):
-        print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
+        # # print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
         # Get embeddings from perturbed latent codes
         embs, _ = lat2embs(net, lat_codes + deltas, few=True)
-        import pdb; pdb.set_trace()
         # Compute current predictions and check for attack success
         all_dists = get_dists(embs, orig_embs, method=METHOD)
-        preds = torch.argmin(all_dists, dim=1)
+        preds = torch.argmin(all_dists, 1)
         success = preds != labels
-        targets = orig_embs[labels]
-        dists = get_pairwise_dists(embs, targets, method=METHOD)
-        loss = -dists.mean()
-        print('loss:', loss.item())
+        # # print('successes:', success.sum().item())
+        if torch.all(success): break
+        # Compute loss
+        loss = compute_loss(all_dists, labels, loss_type=LOSS_TYPE)
+        # # print('Current loss:', loss.item())
         # Backward and optim step
         optim.zero_grad()
         loss.backward()
         optim.step()
         # Projection
-        proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
-            check=True, dirs=DIRS, on_surface=False)
-        # Modify deltas for which attack has not been successful yet
-        deltas[~success] = proj[~success].detach()
+        with torch.no_grad():
+            proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
+                check=True, dirs=DIRS, on_surface=False)
+            # Modify deltas for which attack has not been successful yet
+            deltas[~success] = proj[~success]
 
-    return deltas
+    print(f'Found {success.sum()} adversaries with {idx_iter+1} iterations!')
+    return deltas, success.sum()
 
 
 def main():
     # DNN
     net = get_net(method=METHOD)
     print('Generating original images and embeddings')
-    all_embs, all_ims = lat2embs(net, LAT_CODES[:100], with_tqdm=True)
+    all_embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
     all_embs = all_embs.to(DEVICE)
     # --------------------------------------------------------------------------
     print('Computing adversaries')
-    for idx, btch_cods in enumerate(GENERATOR.get_batch_inputs(LAT_CODES)):
+    all_deltas = []
+    successes = 0
+    for idx, btch_cods in tqdm(enumerate(GENERATOR.get_batch_inputs(LAT_CODES))):
         batch_size = btch_cods.size(0)
         labels = torch.arange(idx*batch_size, (idx+1)*batch_size, device=DEVICE)
-        deltas = find_adversaries(net, btch_cods.to(DEVICE), labels, 
+        deltas, succ = find_adversaries(net, btch_cods.to(DEVICE), labels, 
             all_embs)
-        import pdb; pdb.set_trace()
+        successes += succ
+        all_deltas.append(deltas.detach())
         
+    import pdb; pdb.set_trace()
     temp_embs, temp_ims = lat2embs(net, LAT_CODES[:NUM], few=True)
     (temp_ims - all_ims[:NUM].cuda()).sum((1,2,3))
     orig_labels = 0
