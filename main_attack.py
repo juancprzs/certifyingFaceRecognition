@@ -44,14 +44,19 @@ BATCH_SIZE = 32
 N_SHOW_ERRS = 5
 DATASET = 'ffhq'
 IMAGE_EXT = 'png'
-LOSS_TYPE = 'nearest'
 GAN_NAME = 'stylegan'
 METHOD = 'insightface'
 OUTPUT_DIR = 'remove_soon'
 DEVICE = torch.device('cuda')
-FRS_METHODS = ['insightface', 'facenet']
-LOSS_TYPES = ['away', 'nearest', 'cross-ent']
 IMG_SIZE = 112 if METHOD == 'insightface' else 160
+# Optimization params
+LR = 1e-1
+MOMENTUM = 0.9
+# Loss definition
+LOSS_TYPE = 'nearest'
+PROBABILITY_LOSS = False
+FRS_METHODS = ['insightface', 'facenet']
+LOSS_TYPES = ['away', 'nearest', 'diff']
 assert LOSS_TYPE in LOSS_TYPES
 
 # Paths
@@ -290,9 +295,15 @@ def get_pairwise_dists(embs1, embs2, method='insightface'):
         return 1 - dot
 
 
-def compute_loss(all_dists, labels, loss_type='away'):
+def compute_loss(all_dists, labels, loss_type='away', use_probs=True):
+    vals = F.softmax(-all_dists, dim=1) if use_probs else all_dists
+    # Get value to target
+    val2target = torch.gather(vals, 1, labels.view(-1, 1))
+    # Get value to highest-performing class that *is not* the target
+    value = -1 if use_probs else float('inf')
+    mod_vals = torch.scatter(vals, 1, labels.view(-1, 1), value)
     if loss_type == 'away':
-        # Check distance to the target
+        # Get distance to target
         dist2target = torch.gather(all_dists, 1, labels.view(-1, 1))
         # We want to MAXIMIZE this distance
         return -dist2target.mean()
@@ -304,8 +315,16 @@ def compute_loss(all_dists, labels, loss_type='away'):
         dist2nearest, _ = torch.min(all_dists_mod, 1)
         # We want to MINIMIZE this distance
         return dist2nearest.mean()
-    elif loss_type == 'cross-ent':
-        return None
+    elif loss_type == 'diff':
+        # Get distance to target
+        dist2target = torch.gather(all_dists, 1, labels.view(-1, 1))
+        # Replace distance to target with infinity -> won't count for minimum
+        all_dists_mod = torch.scatter(all_dists, 1, labels.view(-1, 1), 
+            float('inf'))
+        # Get the distance to the nearest embeddings that *is not* the target
+        dist2nearest, _ = torch.min(all_dists_mod, 1)
+        # We want to MINIMIZE this difference
+        return (dist2nearest - dist2target).mean()
 
 
 def find_adversaries(net, lat_codes, labels, orig_embs, iters=10, 
@@ -322,7 +341,7 @@ def find_adversaries(net, lat_codes, labels, orig_embs, iters=10,
         deltas = torch.zeros_like(lat_codes, requires_grad=True)
     
     # Their corresponding optimizer
-    optim = get_optim(deltas, optim_name='SGD')
+    optim = get_optim(deltas, optim_name='SGD', lr=LR, momentum=MOMENTUM)
     for idx_iter in range(iters):
         # # print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
         # Get embeddings from perturbed latent codes
@@ -331,11 +350,10 @@ def find_adversaries(net, lat_codes, labels, orig_embs, iters=10,
         all_dists = get_dists(embs, orig_embs, method=METHOD)
         preds = torch.argmin(all_dists, 1)
         success = preds != labels
-        # # print('successes:', success.sum().item())
-        if torch.all(success): break
+        if torch.all(success):
+            break
         # Compute loss
         loss = compute_loss(all_dists, labels, loss_type=LOSS_TYPE)
-        # # print('Current loss:', loss.item())
         # Backward and optim step
         optim.zero_grad()
         loss.backward()
@@ -355,7 +373,7 @@ def main():
     # DNN
     net = get_net(method=METHOD)
     print('Generating original images and embeddings')
-    all_embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
+    all_embs, all_ims = lat2embs(net, LAT_CODES[:50], with_tqdm=True)
     all_embs = all_embs.to(DEVICE)
     # --------------------------------------------------------------------------
     print('Computing adversaries')
