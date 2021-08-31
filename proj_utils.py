@@ -129,18 +129,24 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
     def solve(A, shifted):
         def fun(t, vec):
             inv = torch.linalg.inv(torch.eye(A.shape[0], device=A.device) + t*A)
-            inter = torch.matmul(inv, torch.matmul(A, inv))
+            # inter = torch.matmul(inv, torch.matmul(A, inv))
+            inter = torch.linalg.multi_dot([inv, A, inv])
             return sq_distance(inter, vec) - 1
         
         bracket = [np.finfo(float).eps, 1e3]
-        solutions = []
+        sols, which_out = [], []
         for idx in range(shifted.shape[0]):
             f = lambda t: fun(t, shifted[idx].reshape(1, -1, 1))
             eval1, eval2 = f(bracket[0]).item(), f(bracket[1]).item()
-            solution = root_scalar(f, method='bisect', bracket=bracket)
-            solutions.append(solution.root)
+            if eval1 * eval2 < 0: # Opposing signs
+                solution = root_scalar(f, method='bisect', bracket=bracket)
+                sols.append(solution.root)
+                which_out.append(True)
+            else:
+                which_out.append(False)
         
-        return torch.tensor(solutions, device=A.device).reshape(-1, 1)
+        return (torch.tensor(sols, device=A.device).reshape(-1, 1), 
+            torch.tensor(which_out, device=A.device))
 
     if mu is None:
         mu = torch.zeros((y.shape[0], 1), device=y.device)
@@ -160,12 +166,14 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
     shifted = y - mu
 
     # Check y that are outside region and extract them, then project those
-    sq_dist = sq_distance(sc_A, shifted)
-    which_out = sq_dist > 1
-    extracted = shifted[which_out]
+    # sq_dist = sq_distance(sc_A, shifted)
+    # which_out = sq_dist > 1
+    # extracted = shifted[which_out]
 
     # Find scalar t's
-    t = solve(sc_A, extracted)
+    # t = solve(sc_A, extracted)
+    t, which_out = solve(sc_A, shifted)
+    extracted = shifted[which_out]
 
     # Project with the t's that were found
     mat = torch.unsqueeze(t, 2) * torch.unsqueeze(sc_A, 0)

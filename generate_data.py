@@ -18,9 +18,10 @@ from tqdm import tqdm
 from models.model_settings import MODEL_POOL
 from models.pggan_generator import PGGANGenerator
 # from models.stylegan_generator import StyleGANGenerator
-from models.mod_stylegan_generator import ModStyleGANGenerator
+from pathlib import Path
 from proj_utils import set_seed
 from utils.logger import setup_logger
+from models.mod_stylegan_generator import ModStyleGANGenerator
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 set_seed(DEVICE, seed=2)
@@ -58,6 +59,12 @@ def main():
   """Main function."""
   args = parse_args()
   logger = setup_logger(args.output_dir, logger_name='generate_data')
+  # Images dir
+  ims_out_dir = os.path.join(args.output_dir, 'ims')
+  Path(ims_out_dir).mkdir(parents=True, exist_ok=True)
+  # Tensors dir
+  tens_out_dir = os.path.join(args.output_dir, 'tensors')
+  Path(tens_out_dir).mkdir(parents=True, exist_ok=True)
 
   logger.info(f'Initializing generator.')
   gan_type = MODEL_POOL[args.model_name]['gan_type']
@@ -94,9 +101,13 @@ def main():
     for key, val in outputs.items():
       if key == 'image':
         for image in val:
-          save_path = os.path.join(args.output_dir, f'{pbar.n:06d}.png')
-          curr_image = image.cpu().detach().numpy().transpose(1, 2, 0)
-          cv2.imwrite(save_path, curr_image[:, :, ::-1])
+          # Save tensor
+          save_path_tens = os.path.join(tens_out_dir, f'{pbar.n:06d}.pth')
+          torch.save(image.detach().cpu(), save_path_tens)
+          # And the image as PNG
+          save_path_png = os.path.join(ims_out_dir, f'{pbar.n:06d}.png')
+          curr_image = 255. * image.cpu().detach().numpy().transpose(1, 2, 0)
+          cv2.imwrite(save_path_png, curr_image[:, :, ::-1])
           pbar.update(1)
       else:
         results[key].append(val)

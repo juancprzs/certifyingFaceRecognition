@@ -214,8 +214,8 @@ class ModStyleGANGenerator(BaseGenerator):
     Returns:
       A dictionary whose values are raw outputs from the generator.
     """
-    if not isinstance(latent_codes, torch.Tensor):
-      raise ValueError(f'Latent codes should be with type `torch.Tensor`!')
+    # if not isinstance(latent_codes, torch.Tensor):
+    #   raise ValueError(f'Latent codes should be with type `torch.Tensor`!')
 
     results = {}
 
@@ -231,7 +231,7 @@ class ModStyleGANGenerator(BaseGenerator):
                          f'than {self.batch_size}, and `latent_space_dim` '
                          f'equal to {self.latent_space_dim}!\n'
                          f'But {latent_codes_shape} received!')
-      zs = latent_codes # torch.from_numpy(latent_codes).type(torch.FloatTensor)
+      zs = torch.from_numpy(latent_codes).type(torch.FloatTensor)
       zs = zs.to(self.run_device)
       ws = self.model.mapping(zs)
       wps = self.model.truncation(ws)
@@ -300,7 +300,10 @@ class ModStyleGANGenerator(BaseGenerator):
       raise ValueError(f'Input should be with shape [batch_size, channel, '
                        f'height, width], where channel equals to 1 or 3. '
                        f'But {images_shape} is received!')
-    images = (images - self.min_val) * 255 / (self.max_val - self.min_val)
-    images = torch.clamp(images + 0.5, 0, 255) # .type(torch.uint8)
+    # images = (images - self.min_val) * 255 / (self.max_val - self.min_val)
+    images = (images - self.min_val) / (self.max_val - self.min_val)
+    # images = torch.clamp(images + 0.5, 0, 255).type(torch.uint8)
+    offset = 0.5 / 255
+    images = torch.clamp(images + offset, 0, 1)
   
     return images

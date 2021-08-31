@@ -219,7 +219,7 @@ class BaseGenerator(object):
                        f'height, width], where channel equals to 1 or 3. '
                        f'But {images_shape} is received!')
     images = (images - self.min_val) * 255 / (self.max_val - self.min_val)
-    images = np.clip(images + 0.5, 0, 255) # .astype(np.uint8)
+    images = np.clip(images + 0.5, 0, 255).astype(np.uint8)
     images = images.transpose(0, 2, 3, 1)
     if self.channel_order == 'BGR':
       images = images[:, :, :, ::-1]
@@ -229,6 +229,7 @@ class BaseGenerator(object):
   def easy_synthesize(self, latent_codes, **kwargs):
     """Wraps functions `synthesize()` and `postprocess()` together."""
     outputs = self.synthesize(latent_codes, **kwargs)
+    # Don't postprocess stuff
     if 'image' in outputs:
       outputs['image'] = self.postprocess(outputs['image'])
 
