@@ -98,18 +98,26 @@ def parse_args():
                         help='Optimizer to use')
     parser.add_argument('--iters', type=int, default=10, 
                         help='Optimization iterations per instance')
-    parser.add_argument('--rand-init-on-surf', action='store_true', default=False,
-                        help='Random initialization is on region surface')
+    parser.add_argument('--not-on-surf', action='store_true', default=False,
+                        help='Random initialization is NOT on region surface')
     return parser.parse_args()
 
 
+def args2text(args):
+    d = vars(args)
+    text = ' | '.join([str(key) + ': ' + str(d[key]) for key in d])
+    return text
+
+
 args = parse_args()
+
 
 # Script argument-dependent constants
 IMG_SIZE = INP_RESOLUTIONS[args.face_recog_method]
 
 # The model and the latent codes
 LOGGER = setup_logger(args.output_dir, logger_name='generate_data')
+LOGGER.info(args2text(args))
 LOGGER.info(f'Initializing generator.')
 GENERATOR = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
 GENERATOR.model.eval()
@@ -423,7 +431,7 @@ def main():
             net, btch_cods.to(DEVICE), labels, embs, optim_name=args.optim, 
             lr=args.lr, iters=args.iters, momentum=args.momentum, 
             frs_method=args.face_recog_method, loss_type=args.loss, 
-            random_init=True, rand_init_on_surf=args.rand_init_on_surf
+            random_init=True, rand_init_on_surf=not args.not_on_surf
         )
         tot += batch_size
         n_succ += succ.sum()

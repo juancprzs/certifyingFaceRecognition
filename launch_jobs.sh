@@ -18,4 +18,6 @@ python main_attack.py \
 --rand-init-on-surf \
 --output-dir lr1e-2_m0.${SLURM_ARRAY_TASK_ID} \
 --lr 1e-2 \
---momentum 0.${SLURM_ARRAY_TASK_ID}
+--momentum 0.${SLURM_ARRAY_TASK_ID} \
+--loss xent \
+--optim SGD
