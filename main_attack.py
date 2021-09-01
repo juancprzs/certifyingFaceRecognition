@@ -113,10 +113,6 @@ LOGGER = setup_logger(args.output_dir, logger_name='generate_data')
 LOGGER.info(f'Initializing generator.')
 GENERATOR = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
 GENERATOR.model.eval()
-for child in GENERATOR.model.children():
-    if type(child) == nn.BatchNorm2d:
-        child.track_running_stats = False
-
 KWARGS = { 'latent_space_type' : LAT_SPACE }
 LAT_CODES_PATH = osp.join(ORIG_DATA_PATH, f'{LAT_SPACE}.npy')
 LAT_CODES = torch.from_numpy(
