@@ -401,7 +401,7 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
                 check=True, dirs=DIRS, on_surface=False)
             # Modify deltas for which attack has not been successful yet
             deltas[~success] = proj[~success]
-    
+
     return deltas.detach().cpu(), success
 
 
@@ -472,179 +472,165 @@ def main():
             plt.close()
 
         
-    import pdb; pdb.set_trace()
-    temp_embs, temp_ims = lat2embs(net, LAT_CODES[:NUM], few=True)
-    (temp_ims - all_ims[:NUM].cuda()).sum((1,2,3))
-    orig_labels = 0
-    some_codes.requires_grad = True
-    deltas = find_adversaries(net, LAT_CODES[NUM:2*NUM].to(DEVICE), embs, orig_labels, 
-        random_init=False)
-    deltas = find_adversaries(net, LAT_CODES[2*NUM:3*NUM].to(DEVICE), embs, orig_labels, 
-        random_init=False)
-
-
-    loss = local_embs.mean()
-    loss.backward()
-
-    print('lat codes grad: ', some_codes.grad)
-    # ------------------------------------------------------------------------------
-    # # # # # Embeddings of the original images
-    embs, im_names = compute_embs(net, original=True)
-    orig_labels = torch.tensor([int(x.replace(f'.pth','')) for x in im_names])
-    orig_dists = get_dists(embs, embs, method=args.face_recog_method)
-    # Get inter-cluster distances (i.e. between clusters)
-    orig_dists_copy = orig_dists.numpy().copy()
-    orig_dists_copy[np.eye(orig_dists_copy.shape[0], dtype=bool)] = float('inf')
-    min_vals = orig_dists_copy.min(axis=0) # Minimum w/o considering diagonal
-
     if PLOT:
-        plt.hist(min_vals, edgecolor='black', linewidth=1, bins=20)
-        mean, std = min_vals.mean(), min_vals.std()
-        minn, maxx = min_vals.min(), min_vals.max()
-        titl = 'Dists to closest cluster\n' \
-            f'mean={mean:3.2f}, std={std:3.2f}, max={maxx:3.2f}, min={minn:3.2f}'
-        plt.title(titl, fontsize=24)
-        plt.show()
+        # ------------------------------------------------------------------------------
+        # # # # # Embeddings of the original images
+        embs, im_names = compute_embs(net, original=True)
+        orig_labels = torch.tensor([int(x.replace(f'.pth','')) for x in im_names])
+        orig_dists = get_dists(embs, embs, method=args.face_recog_method)
+        # Get inter-cluster distances (i.e. between clusters)
+        orig_dists_copy = orig_dists.numpy().copy()
+        orig_dists_copy[np.eye(orig_dists_copy.shape[0], dtype=bool)] = float('inf')
+        min_vals = orig_dists_copy.min(axis=0) # Minimum w/o considering diagonal
 
-    # Embeddings of the new images
-    new_embs, new_im_names = compute_embs(net, original=False)
-    targets = torch.tensor([int(x.split('/')[0].split('_')[1]) 
-        for x in new_im_names])
+        if PLOT:
+            plt.hist(min_vals, edgecolor='black', linewidth=1, bins=20)
+            mean, std = min_vals.mean(), min_vals.std()
+            minn, maxx = min_vals.min(), min_vals.max()
+            titl = 'Dists to closest cluster\n' \
+                f'mean={mean:3.2f}, std={std:3.2f}, max={maxx:3.2f}, min={minn:3.2f}'
+            plt.title(titl, fontsize=24)
+            plt.show()
 
-
-    # Perturbations per ID
-    perts_per_id = new_embs.size(0) // embs.size(0)
-
-    # Compute distances within clusters
-    dists = get_dists(new_embs, embs, method=args.face_recog_method)
-    dists_to_centroid = torch.gather(dists, 1, targets.view(-1, 1))
-    if PLOT:
-        plt.hist(dists_to_centroid.numpy(), edgecolor='black', linewidth=1, bins=20)
-        mean, std = dists_to_centroid.mean(), dists_to_centroid.std()
-        minn, maxx = dists_to_centroid.min(), dists_to_centroid.max()
-        titl = 'Dists to correct centroid\n' \
-            f'mean={mean:3.2f}, std={std:3.2f}, max={maxx:3.2f}, min={minn:3.2f}'
-        plt.title(titl, fontsize=24)
-        plt.show()
-
-    # # # # # Check the accuracy of the network on these images
-    # Nearest neighbor
-    argsort = torch.argsort(dists, dim=1, descending=False) # Ascending order
-    assigns = argsort[:, 0] # Equivalent to torch.argmin(dists, dim=1)
-    # Prediction is: each instance is of the same class as the instance at embs[assigns]
-    preds = orig_labels[assigns]
-    correct = (preds == targets).sum().item()
-    n_wrong = new_embs.size(0) - correct
-    acc = correct / new_embs.size(0)
-    print(f'Accuracy is {100.*acc:3.2f}%')
+        # Embeddings of the new images
+        new_embs, new_im_names = compute_embs(net, original=False)
+        targets = torch.tensor([int(x.split('/')[0].split('_')[1]) 
+            for x in new_im_names])
 
 
-    # Create DataFrame for easier extraction of data
-    dists_to_preds = torch.gather(dists, 1, preds.view(-1, 1))
-    df = pd.DataFrame({
-        'im_path' : new_im_names, 
-        'target' : targets, 
-        'dist2target' : dists_to_centroid.squeeze(), 
-        'pred' : assigns, 
-        'dist2pred' : dists_to_preds.squeeze()
-    })
+        # Perturbations per ID
+        perts_per_id = new_embs.size(0) // embs.size(0)
+
+        # Compute distances within clusters
+        dists = get_dists(new_embs, embs, method=args.face_recog_method)
+        dists_to_centroid = torch.gather(dists, 1, targets.view(-1, 1))
+        if PLOT:
+            plt.hist(dists_to_centroid.numpy(), edgecolor='black', linewidth=1, bins=20)
+            mean, std = dists_to_centroid.mean(), dists_to_centroid.std()
+            minn, maxx = dists_to_centroid.min(), dists_to_centroid.max()
+            titl = 'Dists to correct centroid\n' \
+                f'mean={mean:3.2f}, std={std:3.2f}, max={maxx:3.2f}, min={minn:3.2f}'
+            plt.title(titl, fontsize=24)
+            plt.show()
+
+        # # # # # Check the accuracy of the network on these images
+        # Nearest neighbor
+        argsort = torch.argsort(dists, dim=1, descending=False) # Ascending order
+        assigns = argsort[:, 0] # Equivalent to torch.argmin(dists, dim=1)
+        # Prediction is: each instance is of the same class as the instance at embs[assigns]
+        preds = orig_labels[assigns]
+        correct = (preds == targets).sum().item()
+        n_wrong = new_embs.size(0) - correct
+        acc = correct / new_embs.size(0)
+        print(f'Accuracy is {100.*acc:3.2f}%')
 
 
-    where_wrong = preds != targets
-    # Get the counts through hist and then close the figure
-    counts, _, _ = plt.hist(targets[where_wrong].numpy(), 
-        range=(0, embs.size(0)-1), bins=embs.size(0))
-    plt.close()
-    if PLOT:
+        # Create DataFrame for easier extraction of data
+        dists_to_preds = torch.gather(dists, 1, preds.view(-1, 1))
+        df = pd.DataFrame({
+            'im_path' : new_im_names, 
+            'target' : targets, 
+            'dist2target' : dists_to_centroid.squeeze(), 
+            'pred' : assigns, 
+            'dist2pred' : dists_to_preds.squeeze()
+        })
+
+
+        where_wrong = preds != targets
+        # Get the counts through hist and then close the figure
         counts, _, _ = plt.hist(targets[where_wrong].numpy(), 
             range=(0, embs.size(0)-1), bins=embs.size(0))
-        plt.title(f'Errors per ID | Total errors: {n_wrong}', fontsize=24)
-        plt.xlabel('ID', fontsize=20)
-        plt.ylabel('Counts', fontsize=20)
-        plt.show()
-
-        bins = np.linspace(-0.5, perts_per_id+0.5, perts_per_id+2)
-        new_counts, _, _ = plt.hist(counts, bins=bins, edgecolor='black', 
-            linewidth=1)
-        new_n_wrong = int(np.dot(new_counts, np.arange(perts_per_id+1)))
-        assert n_wrong == new_n_wrong
-        plt.title('Distrib of # of errors', fontsize=24)
-        plt.xlabel('# of errors', fontsize=20)
-        plt.ylabel('Counts', fontsize=20)
-        plt.show()
-
-        # Cumulative distribution of errors
-        sorted_errs = np.sort(counts)[::-1]
-        cumsum = np.cumsum(sorted_errs)
-        cumsum = cumsum[cumsum<new_n_wrong]
-        cum_distrib = np.concatenate([cumsum, np.array(n_wrong).reshape(1,)])
-        plt.bar(x=range(1, len(cum_distrib)+1), height=cum_distrib)
-        plt.title(
-            f'Cumulative distribution of errors | {n_wrong} errors from '\
-            f'{len(cum_distrib)} identities', 
-            fontsize=24
-        )
-        plt.xlabel('Sorted IDs', fontsize=20)
-        plt.ylabel('Total counts', fontsize=20)
-        plt.show()
-
-
-    # Troubling identities
-    sorted_ids = np.argsort(counts)[::-1]
-    sorted_counts = counts[sorted_ids]
-
-    troubling_ids = sorted_ids[sorted_counts > 0]
-    troubling_counts = sorted_counts[sorted_counts > 0]
-
-
-    # Plot some troubling identities
-    if PLOT:
-        print(f'Will show {N_SHOW_ERRS} identities with multiple errors')
-        for tr_id in troubling_ids[:N_SHOW_ERRS]:
-            fig, axes = plt.subplots(nrows=4, ncols=perts_per_id)
-            # The anchor image for this ID
-            orig_im_path = osp.join(
-                ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + f'.{IMAGE_EXT}')
-            orig_im = mpimg.imread(orig_im_path)
-            mid_axes = axes[0, perts_per_id//2]
-            mid_axes.imshow(orig_im); mid_axes.set_title(f'{tr_id}', fontsize=20)
-
-            # The images whose target was this ID
-            where_bool = df['im_path'].apply(
-                lambda x: x.startswith('class_' + f'{tr_id}'.zfill(3) + '/'))
-            these_ims_df = df.loc[where_bool]
-            these_ims_df.sort_values(by='im_path')
-
-            # Each image
-            for index, (_, row) in enumerate(these_ims_df.iterrows()):
-                dist2target = row['dist2target']
-                im_name = row['im_path']
-                titl = f'{im_name}\nDist2target = {dist2target:.2f}'
-                if row['target'] == row['pred']: # Correctly classified
-                    axis_idx = 1
-                else: # Incorrectly classified
-                    axis_idx = 2
-                    dist2pred = row['dist2pred']
-                    titl += f'\nDist2pred = {dist2pred:.2f}'
-                    # Load the anchor image
-                    this_pred = row['pred']
-                    anchor_im_path = osp.join(ORIG_IMAGES_PATH, 
-                        f'{this_pred}'.zfill(6) + f'.{IMAGE_EXT}')
-                    anchor_im = mpimg.imread(anchor_im_path)
-                    axes[3, index].imshow(anchor_im)
-                    axes[3, index].set_title(f'{this_pred}', fontsize=20)
-
-                # The image itself
-                this_im = mpimg.imread(osp.join(DATA_PATH, im_name))
-                axes[axis_idx, index].imshow(this_im)
-                axes[axis_idx, index].set_title(titl, fontsize=20)
-
-            # Turn off all axes
-            for idx in range(4):
-                for jdx in range(perts_per_id): 
-                    axes[idx, jdx].axis('off')
-            
+        plt.close()
+        if PLOT:
+            counts, _, _ = plt.hist(targets[where_wrong].numpy(), 
+                range=(0, embs.size(0)-1), bins=embs.size(0))
+            plt.title(f'Errors per ID | Total errors: {n_wrong}', fontsize=24)
+            plt.xlabel('ID', fontsize=20)
+            plt.ylabel('Counts', fontsize=20)
             plt.show()
+
+            bins = np.linspace(-0.5, perts_per_id+0.5, perts_per_id+2)
+            new_counts, _, _ = plt.hist(counts, bins=bins, edgecolor='black', 
+                linewidth=1)
+            new_n_wrong = int(np.dot(new_counts, np.arange(perts_per_id+1)))
+            assert n_wrong == new_n_wrong
+            plt.title('Distrib of # of errors', fontsize=24)
+            plt.xlabel('# of errors', fontsize=20)
+            plt.ylabel('Counts', fontsize=20)
+            plt.show()
+
+            # Cumulative distribution of errors
+            sorted_errs = np.sort(counts)[::-1]
+            cumsum = np.cumsum(sorted_errs)
+            cumsum = cumsum[cumsum<new_n_wrong]
+            cum_distrib = np.concatenate([cumsum, np.array(n_wrong).reshape(1,)])
+            plt.bar(x=range(1, len(cum_distrib)+1), height=cum_distrib)
+            plt.title(
+                f'Cumulative distribution of errors | {n_wrong} errors from '\
+                f'{len(cum_distrib)} identities', 
+                fontsize=24
+            )
+            plt.xlabel('Sorted IDs', fontsize=20)
+            plt.ylabel('Total counts', fontsize=20)
+            plt.show()
+
+
+        # Troubling identities
+        sorted_ids = np.argsort(counts)[::-1]
+        sorted_counts = counts[sorted_ids]
+
+        troubling_ids = sorted_ids[sorted_counts > 0]
+        troubling_counts = sorted_counts[sorted_counts > 0]
+
+
+        # Plot some troubling identities
+        if PLOT:
+            print(f'Will show {N_SHOW_ERRS} identities with multiple errors')
+            for tr_id in troubling_ids[:N_SHOW_ERRS]:
+                fig, axes = plt.subplots(nrows=4, ncols=perts_per_id)
+                # The anchor image for this ID
+                orig_im_path = osp.join(
+                    ORIG_IMAGES_PATH, f'{tr_id}'.zfill(6) + f'.{IMAGE_EXT}')
+                orig_im = mpimg.imread(orig_im_path)
+                mid_axes = axes[0, perts_per_id//2]
+                mid_axes.imshow(orig_im); mid_axes.set_title(f'{tr_id}', fontsize=20)
+
+                # The images whose target was this ID
+                where_bool = df['im_path'].apply(
+                    lambda x: x.startswith('class_' + f'{tr_id}'.zfill(3) + '/'))
+                these_ims_df = df.loc[where_bool]
+                these_ims_df.sort_values(by='im_path')
+
+                # Each image
+                for index, (_, row) in enumerate(these_ims_df.iterrows()):
+                    dist2target = row['dist2target']
+                    im_name = row['im_path']
+                    titl = f'{im_name}\nDist2target = {dist2target:.2f}'
+                    if row['target'] == row['pred']: # Correctly classified
+                        axis_idx = 1
+                    else: # Incorrectly classified
+                        axis_idx = 2
+                        dist2pred = row['dist2pred']
+                        titl += f'\nDist2pred = {dist2pred:.2f}'
+                        # Load the anchor image
+                        this_pred = row['pred']
+                        anchor_im_path = osp.join(ORIG_IMAGES_PATH, 
+                            f'{this_pred}'.zfill(6) + f'.{IMAGE_EXT}')
+                        anchor_im = mpimg.imread(anchor_im_path)
+                        axes[3, index].imshow(anchor_im)
+                        axes[3, index].set_title(f'{this_pred}', fontsize=20)
+
+                    # The image itself
+                    this_im = mpimg.imread(osp.join(DATA_PATH, im_name))
+                    axes[axis_idx, index].imshow(this_im)
+                    axes[axis_idx, index].set_title(titl, fontsize=20)
+
+                # Turn off all axes
+                for idx in range(4):
+                    for jdx in range(perts_per_id): 
+                        axes[idx, jdx].axis('off')
+                
+                plt.show()
 
 
 if __name__ == '__main__':
