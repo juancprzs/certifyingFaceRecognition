@@ -83,23 +83,27 @@ set_seed(DEVICE, seed=2)
 
 
 # # Input arguments
-parser = argparse.ArgumentParser(description='Compute semantic adversaries')
-parser.add_argument('--lr', type=float, default=1e-2, help='Learning rate')
-parser.add_argument('--momentum', type=float, default=0.9, 
-                    help='Momentum for SGD')
-parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
-                    help='Loss to optimize')
-parser.add_argument('--output-dir', type=str, required=True,
-                    help='Directory to save the output results. (required)')
-parser.add_argument('--face-recog-method', type=str, default='insightface', 
-                    choices=FRS_METHODS, help='Face recognition system to use')
-parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
-                    help='Optimizer to use')
-parser.add_argument('--iters', type=int, default=10, 
-                    help='Optimization iterations per instance')
-parser.add_argument('--rand-init-on-surf', action='store_true', default=False,
-                    help='Random initialization is on region surface')
-args = parser.parse_args()
+def parse_args():
+    parser = argparse.ArgumentParser(description='Compute semantic adversaries')
+    parser.add_argument('--lr', type=float, default=1e-2, help='Learning rate')
+    parser.add_argument('--momentum', type=float, default=0.9, 
+                        help='Momentum for SGD')
+    parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
+                        help='Loss to optimize')
+    parser.add_argument('--output-dir', type=str, required=True,
+                        help='Directory to save the output results. (required)')
+    parser.add_argument('--face-recog-method', type=str, default='insightface', 
+                        choices=FRS_METHODS, help='Face recognition system to use')
+    parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
+                        help='Optimizer to use')
+    parser.add_argument('--iters', type=int, default=10, 
+                        help='Optimization iterations per instance')
+    parser.add_argument('--rand-init-on-surf', action='store_true', default=False,
+                        help='Random initialization is on region surface')
+    return parser.parse_args()
+
+
+args = parse_args()
 
 # Script argument-dependent constants
 IMG_SIZE = INP_RESOLUTIONS[args.face_recog_method]
@@ -408,13 +412,15 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
 def main():
     # DNN
     net = get_net(method=args.face_recog_method)
-    print('Generating original images and embeddings')
+    LOGGER.info(f'Generating original images and embeddings')
     embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
     embs = embs.to(DEVICE)
     # --------------------------------------------------------------------------
-    print('Computing adversaries')
+    LOGGER.info(f'Computing adversaries')
+    n_succ, tot = 0, 0
     deltas, successes = [], []
-    for idx, btch_cods in enumerate(tqdm(GENERATOR.get_batch_inputs(LAT_CODES))):
+    pbar = tqdm(GENERATOR.get_batch_inputs(LAT_CODES))
+    for idx, btch_cods in enumerate(pbar):
         batch_size = btch_cods.size(0)
         labels = torch.arange(idx*batch_size, (idx+1)*batch_size, device=DEVICE)
         curr_deltas, succ = find_adversaries(
@@ -423,15 +429,18 @@ def main():
             frs_method=args.face_recog_method, loss_type=args.loss, 
             random_init=True, rand_init_on_surf=args.rand_init_on_surf
         )
+        tot += batch_size
+        n_succ += succ.sum()
+        pbar.set_description(f'-> {n_succ} adversaries for {tot} identities')
         successes.append(succ)
         deltas.append(curr_deltas)
 
     deltas, successes = torch.cat(deltas), torch.cat(successes)
     n_succ = successes.sum()
     if n_succ == 0:
-        print('Didnt find any adversary! :(')
+        LOGGER.info(f'Didnt find any adversary! :(')
     else:
-        print(f'Found {n_succ} adversaries for {embs.size(0)} identities')
+        LOGGER.info(f'Total: {n_succ} adversaries for {embs.size(0)} identities')
         # Compute the adversarial images according to the computed deltas
         adv_lat_codes = LAT_CODES[successes] + deltas[successes]
         # Pad input (if necessary)
@@ -454,7 +463,7 @@ def main():
         orig, confu = all_ims[successes], all_ims[curr_labels]
 
         # Show in a plot
-        print('Plotting adversaries')
+        LOGGER.info(f'Plotting adversaries')
         for idx, (ori, adv, conf) in enumerate(zip(orig, adv_ims, confu)):
             plt.figure()
             plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
