@@ -1,5 +1,6 @@
 import cv2
 import torch
+import argparse
 import numpy as np
 import pandas as pd
 import os.path as osp
@@ -28,13 +29,19 @@ from proj_utils import (get_projection_matrices, sample_ellipsoid,
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+assert torch.cuda.is_available()
+
 # For deterministic behavior
 cudnn.benchmark = False
 cudnn.deterministic = True
-# torch.autograd.set_detect_anomaly(True)
-assert torch.cuda.is_available()
 
-# Constants
+OPTIMS = ['Adam', 'SGD']
+FRS_METHODS = ['insightface', 'facenet']
+LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
+INP_RESOLUTIONS = { 'insightface' : 112, 'facenet' : 160 }
+
+# # Script constants
+# Misc
 STD = 0.5
 MEAN = 0.5
 PLOT = False
@@ -45,20 +52,7 @@ N_SHOW_ERRS = 5
 DATASET = 'ffhq'
 IMAGE_EXT = 'png'
 GAN_NAME = 'stylegan'
-METHOD = 'insightface'
-OUTPUT_DIR = 'remove_soon'
 DEVICE = torch.device('cuda')
-IMG_SIZE = 112 if METHOD == 'insightface' else 160
-# Optimization params
-LR = 1e-1
-MOMENTUM = 0.9
-# Loss definition
-LOSS_TYPE = 'nearest'
-PROBABILITY_LOSS = False
-FRS_METHODS = ['insightface', 'facenet']
-LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
-assert LOSS_TYPE in LOSS_TYPES
-
 # Paths
 ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
 ORIG_IMAGES_PATH = osp.join(ORIG_DATA_PATH, 'ims')
@@ -66,32 +60,50 @@ ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
 DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_png_perts/data'
 
+def get_transform():
+    def resize(x):
+        x = x.unsqueeze(0) if x.ndim != 4 else x
+        interp = F.interpolate(x, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', 
+            align_corners=False)
+        return interp.squeeze(0)
+
+    normalize = Normalize((MEAN, MEAN, MEAN), (STD, STD, STD))
+    return Compose([resize, normalize])
 # Transforms
-def resize(x):
-    x = x.unsqueeze(0) if x.ndim != 4 else x
-    interp = F.interpolate(x, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', 
-        align_corners=False)
-    return interp.squeeze(0)
-
-normalize = Normalize((MEAN, MEAN, MEAN), (STD, STD, STD))
-
-TRANSFORM = Compose([
-    resize,
-    normalize
-])
+TRANSFORM = get_transform()
 
 PROJ_MAT, ELLIPSE_MAT, DIRS, _ = get_projection_matrices(dataset=DATASET, 
     gan_name=GAN_NAME)
 DIRS = torch.tensor(DIRS, dtype=torch.float32, device=DEVICE)
 PROJ_MAT = torch.tensor(PROJ_MAT, dtype=torch.float32, device=DEVICE)
 ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE) 
-assert METHOD in FRS_METHODS
 assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
 assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
-
 set_seed(DEVICE, seed=2)
+
+
+# # Input arguments
+parser = argparse.ArgumentParser(description='Compute semantic adversaries')
+parser.add_argument('--lr', type=float, default=1e-2, help='Learning rate')
+parser.add_argument('--momentum', type=float, default=0.9, 
+                    help='Momentum for SGD')
+parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
+                    help='Loss to optimize')
+parser.add_argument('--output-dir', type=str, required=True,
+                    help='Directory to save the output results. (required)')
+parser.add_argument('--face-recog-method', type=str, default='insightface', 
+                    choices=FRS_METHODS, help='Face recognition system to use')
+parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
+                    help='Optimizer to use')
+parser.add_argument('--iters', type=int, default=10, 
+                    help='Optimization iterations per instance')
+args = parser.parse_args()
+
+# Script argument-dependent constants
+IMG_SIZE = INP_RESOLUTIONS[args.face_recog_method]
+
 # The model and the latent codes
-LOGGER = setup_logger(OUTPUT_DIR, logger_name='generate_data')
+LOGGER = setup_logger(args.output_dir, logger_name='generate_data')
 LOGGER.info(f'Initializing generator.')
 GENERATOR = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
 GENERATOR.model.eval()
@@ -350,8 +362,9 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return -1. * xent.mean()
 
 
-def find_adversaries(net, lat_codes, labels, orig_embs, iters=10, 
-        random_init=True, rand_init_on_surf=True):
+def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
+        momentum, frs_method, loss_type, random_init=True, 
+        rand_init_on_surf=True):
     # Initialize deltas
     if random_init:
         # Sample from ellipsoid and project
@@ -364,19 +377,18 @@ def find_adversaries(net, lat_codes, labels, orig_embs, iters=10,
         deltas = torch.zeros_like(lat_codes, requires_grad=True)
     
     # Their corresponding optimizer
-    optim = get_optim(deltas, optim_name='SGD', lr=LR, momentum=MOMENTUM)
+    optim = get_optim(deltas, optim_name=optim_name, lr=lr, momentum=momentum)
     for idx_iter in range(iters):
-        # # print(f'Opt. step #{idx_iter}. deltas.abs().sum()={deltas.abs().sum()}')
         # Get embeddings from perturbed latent codes
         embs, _ = lat2embs(net, lat_codes + deltas, few=True)
         # Compute current predictions and check for attack success
-        all_dists = get_dists(embs, orig_embs, method=METHOD)
+        all_dists = get_dists(embs, orig_embs, method=frs_method)
         preds = torch.argmin(all_dists, 1)
         success = preds != labels
         if torch.all(success):
             break
         # Compute loss
-        loss = compute_loss(all_dists, labels, loss_type=LOSS_TYPE)
+        loss = compute_loss(all_dists, labels, loss_type=loss_type)
         # Backward and optim step
         optim.zero_grad()
         loss.backward()
@@ -389,26 +401,63 @@ def find_adversaries(net, lat_codes, labels, orig_embs, iters=10,
             deltas[~success] = proj[~success]
 
     print(f'Found {success.sum()} adversaries with {idx_iter+1} iterations!')
-    return deltas, success.sum()
+    return deltas.detach().cpu(), success.sum()
 
 
 def main():
     # DNN
-    net = get_net(method=METHOD)
+    net = get_net(method=args.face_recog_method)
     print('Generating original images and embeddings')
-    all_embs, all_ims = lat2embs(net, LAT_CODES[:50], with_tqdm=True)
+    all_embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
     all_embs = all_embs.to(DEVICE)
     # --------------------------------------------------------------------------
     print('Computing adversaries')
     all_deltas = []
     successes = 0
-    for idx, btch_cods in tqdm(enumerate(GENERATOR.get_batch_inputs(LAT_CODES))):
+    for idx, btch_cods in enumerate(tqdm(GENERATOR.get_batch_inputs(LAT_CODES))):
         batch_size = btch_cods.size(0)
         labels = torch.arange(idx*batch_size, (idx+1)*batch_size, device=DEVICE)
-        deltas, succ = find_adversaries(net, btch_cods.to(DEVICE), labels, 
-            all_embs)
+        deltas, succ = find_adversaries(
+            net, btch_cods.to(DEVICE), labels, all_embs, optim_name=args.optim, 
+            lr=args.lr, iters=args.iters, momentum=args.momentum, 
+            frs_method=args.face_recog_method, loss_type=args.loss, 
+            random_init=True, rand_init_on_surf=True
+        )
+        
         successes += succ
-        all_deltas.append(deltas.detach())
+        all_deltas.append(deltas)
+
+    print(f'Found {successes} adversaries for {all_embs.size(0)} identities')
+
+    # Compute the adversarial images according to the computed deltas
+    all_deltas = torch.cat(all_deltas)
+    adv_embs, adv_ims = lat2embs(net, LAT_CODES + all_deltas, with_tqdm=True)
+
+    # Check where the predictions differ from the labels
+    curr_dists = get_dists(adv_embs.to(DEVICE), all_embs, method=frs_method)
+    expctd_labels = torch.arange(0, all_embs.size(0)).to(DEVICE)
+    curr_labels = torch.argmin(curr_dists, 1)
+    where_adv = expctd_labels != curr_labels
+
+    # Extract the original images, the adversaries, and the identities with 
+    # which the people are being confused
+    orig, advs = all_ims[where_adv], adv_ims[where_adv]
+    confu = all_ims[curr_labels[where_adv]]
+
+    # Show in a plot
+    for ori, adv, conf in zip(orig, advs, confu):
+        plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
+        plt.axis('off'); plt.title('Original')
+
+        plt.subplot(132); plt.imshow(adv.cpu().permute(1, 2, 0).numpy())
+        plt.axis('off'); plt.title('Adversary')
+
+        plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
+        plt.axis('off'); plt.title('Prediction')
+
+        plt.tight_layout()
+        plt.show()
+
         
     import pdb; pdb.set_trace()
     temp_embs, temp_ims = lat2embs(net, LAT_CODES[:NUM], few=True)
@@ -429,7 +478,7 @@ def main():
     # # # # # Embeddings of the original images
     embs, im_names = compute_embs(net, original=True)
     orig_labels = torch.tensor([int(x.replace(f'.pth','')) for x in im_names])
-    orig_dists = get_dists(embs, embs, method=METHOD)
+    orig_dists = get_dists(embs, embs, method=args.face_recog_method)
     # Get inter-cluster distances (i.e. between clusters)
     orig_dists_copy = orig_dists.numpy().copy()
     orig_dists_copy[np.eye(orig_dists_copy.shape[0], dtype=bool)] = float('inf')
@@ -454,7 +503,7 @@ def main():
     perts_per_id = new_embs.size(0) // embs.size(0)
 
     # Compute distances within clusters
-    dists = get_dists(new_embs, embs, method=METHOD)
+    dists = get_dists(new_embs, embs, method=args.face_recog_method)
     dists_to_centroid = torch.gather(dists, 1, targets.view(-1, 1))
     if PLOT:
         plt.hist(dists_to_centroid.numpy(), edgecolor='black', linewidth=1, bins=20)
