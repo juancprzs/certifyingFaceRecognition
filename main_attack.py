@@ -97,6 +97,8 @@ parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
                     help='Optimizer to use')
 parser.add_argument('--iters', type=int, default=10, 
                     help='Optimization iterations per instance')
+parser.add_argument('--rand-init-on-surf', action='store_true', default=False,
+                    help='Random initialization is on region surface')
 args = parser.parse_args()
 
 # Script argument-dependent constants
@@ -399,64 +401,75 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
                 check=True, dirs=DIRS, on_surface=False)
             # Modify deltas for which attack has not been successful yet
             deltas[~success] = proj[~success]
-
-    print(f'Found {success.sum()} adversaries with {idx_iter+1} iterations!')
-    return deltas.detach().cpu(), success.sum()
+    
+    return deltas.detach().cpu(), success
 
 
 def main():
     # DNN
     net = get_net(method=args.face_recog_method)
     print('Generating original images and embeddings')
-    all_embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
-    all_embs = all_embs.to(DEVICE)
+    embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
+    embs = embs.to(DEVICE)
     # --------------------------------------------------------------------------
     print('Computing adversaries')
-    all_deltas = []
-    successes = 0
+    deltas, successes = [], []
     for idx, btch_cods in enumerate(tqdm(GENERATOR.get_batch_inputs(LAT_CODES))):
         batch_size = btch_cods.size(0)
         labels = torch.arange(idx*batch_size, (idx+1)*batch_size, device=DEVICE)
-        deltas, succ = find_adversaries(
-            net, btch_cods.to(DEVICE), labels, all_embs, optim_name=args.optim, 
+        curr_deltas, succ = find_adversaries(
+            net, btch_cods.to(DEVICE), labels, embs, optim_name=args.optim, 
             lr=args.lr, iters=args.iters, momentum=args.momentum, 
             frs_method=args.face_recog_method, loss_type=args.loss, 
-            random_init=True, rand_init_on_surf=True
+            random_init=True, rand_init_on_surf=args.rand_init_on_surf
         )
-        
-        successes += succ
-        all_deltas.append(deltas)
+        successes.append(succ)
+        deltas.append(curr_deltas)
 
-    print(f'Found {successes} adversaries for {all_embs.size(0)} identities')
+    deltas, successes = torch.cat(deltas), torch.cat(successes)
+    n_succ = successes.sum()
+    if n_succ == 0:
+        print('Didnt find any adversary! :(')
+    else:
+        print(f'Found {n_succ} adversaries for {embs.size(0)} identities')
+        # Compute the adversarial images according to the computed deltas
+        adv_lat_codes = LAT_CODES[successes] + deltas[successes]
+        # Pad input (if necessary)
+        to_pad = GENERATOR.batch_size - adv_lat_codes.size(0) % GENERATOR.batch_size
+        pad_inp = torch.cat([adv_lat_codes, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+        adv_embs, adv_ims = lat2embs(net, pad_inp, with_tqdm=True)
+        # Extract (since we padded)
+        adv_embs, adv_ims = adv_embs[:n_succ], adv_ims[:n_succ]
 
-    # Compute the adversarial images according to the computed deltas
-    all_deltas = torch.cat(all_deltas)
-    adv_embs, adv_ims = lat2embs(net, LAT_CODES + all_deltas, with_tqdm=True)
+        # Check where the predictions differ from the labels
+        curr_dists = get_dists(adv_embs.to(DEVICE), embs, 
+            method=args.face_recog_method)
+        expctd_labels = torch.nonzero(successes).squeeze()
+        curr_labels = torch.argmin(curr_dists, 1)
+        where_adv = expctd_labels != curr_labels
+        assert torch.all(where_adv), 'All these instances should be adversaries'
 
-    # Check where the predictions differ from the labels
-    curr_dists = get_dists(adv_embs.to(DEVICE), all_embs, method=frs_method)
-    expctd_labels = torch.arange(0, all_embs.size(0)).to(DEVICE)
-    curr_labels = torch.argmin(curr_dists, 1)
-    where_adv = expctd_labels != curr_labels
+        # Extract the original images and the identities with 
+        # which the people are being confused
+        orig, confu = all_ims[successes], all_ims[curr_labels]
 
-    # Extract the original images, the adversaries, and the identities with 
-    # which the people are being confused
-    orig, advs = all_ims[where_adv], adv_ims[where_adv]
-    confu = all_ims[curr_labels[where_adv]]
+        # Show in a plot
+        print('Plotting adversaries')
+        for idx, (ori, adv, conf) in enumerate(zip(orig, adv_ims, confu)):
+            plt.figure()
+            plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
+            plt.axis('off'); plt.title('Original')
 
-    # Show in a plot
-    for ori, adv, conf in zip(orig, advs, confu):
-        plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
-        plt.axis('off'); plt.title('Original')
+            plt.subplot(132); plt.imshow(adv.cpu().permute(1, 2, 0).numpy())
+            plt.axis('off'); plt.title('Adversary')
 
-        plt.subplot(132); plt.imshow(adv.cpu().permute(1, 2, 0).numpy())
-        plt.axis('off'); plt.title('Adversary')
+            plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
+            plt.axis('off'); plt.title('Prediction')
 
-        plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
-        plt.axis('off'); plt.title('Prediction')
-
-        plt.tight_layout()
-        plt.show()
+            plt.tight_layout()
+            path = osp.join(args.output_dir, f'id_{idx}.png')
+            plt.savefig(path, bbox_inches='tight', dpi=400)
+            plt.close()
 
         
     import pdb; pdb.set_trace()
@@ -633,12 +646,6 @@ def main():
             
             plt.show()
 
-
-    import pdb; pdb.set_trace()
-    from sklearn.cluster import KMeans
-    kmeans = KMeans(n_clusters=5_000, random_state=0).fit(embs.detach().numpy())
-    print(kmeans.labels_)
-    print(label.numpy())
 
 if __name__ == '__main__':
     main()
