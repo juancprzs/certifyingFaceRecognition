@@ -5,7 +5,7 @@
 #SBATCH -J lr1e-0
 #SBATCH -o logs/lr1e-0.%J.out
 #SBATCH -e logs/lr1e-0.%J.err
-#SBATCH --time=4:00:00
+#SBATCH --time=12:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
