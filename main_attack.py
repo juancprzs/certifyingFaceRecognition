@@ -93,9 +93,9 @@ def parse_args():
                         help='Directory to save the output results. (required)')
     parser.add_argument('--face-recog-method', type=str, default='insightface', 
                         choices=FRS_METHODS, help='Face recognition system to use')
-    parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
+    parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
                         help='Optimizer to use')
-    parser.add_argument('--iters', type=int, default=10, 
+    parser.add_argument('--iters', type=int, default=100, 
                         help='Optimization iterations per instance')
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')
@@ -403,13 +403,11 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
         loss.backward()
         optim.step()
         # Projection
-        ''''
         with torch.no_grad():
             proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
                 check=True, dirs=DIRS, on_surface=False)
             # Modify deltas for which attack has not been successful yet
             deltas[~success] = proj[~success]
-        '''
 
     return deltas.detach().cpu(), success
 
