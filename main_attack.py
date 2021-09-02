@@ -1,4 +1,3 @@
-import cv2
 import torch
 import argparse
 import numpy as np
@@ -404,11 +403,13 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
         loss.backward()
         optim.step()
         # Projection
+        ''''
         with torch.no_grad():
             proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
                 check=True, dirs=DIRS, on_surface=False)
             # Modify deltas for which attack has not been successful yet
             deltas[~success] = proj[~success]
+        '''
 
     return deltas.detach().cpu(), success
 
