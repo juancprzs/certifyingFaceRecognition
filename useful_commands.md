@@ -1,6 +1,6 @@
 # Connect
 ssh -A -t kw60661.kaust.edu.sa # I dont know why this one shows an error with /tmp/pip-*
-ssh -A -t kw60623.kaust.edu.sa # Working
+ssh -A -t kw60623.kaust.edu.sa # Working. Currently running 1e-3 and 1e-4
 ssh -A -t kw60624.kaust.edu.sa # Working
 ssh -A -t kw60746.kaust.edu.sa
 
