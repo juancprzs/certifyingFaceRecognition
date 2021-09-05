@@ -438,17 +438,22 @@ def main():
         successes.append(succ)
         deltas.append(curr_deltas)
 
+    # Store adversaries
     deltas, successes = torch.cat(deltas), torch.cat(successes)
+    torch.save(deltas, osp.join(args.output_dir, 'deltas.pth'))
+    torch.save(successes, osp.join(args.output_dir, 'successes.pth'))
+    
     n_succ = successes.sum()
     if n_succ == 0:
         LOGGER.info(f'Didnt find any adversary! :(')
     else:
         LOGGER.info(f'Total: {n_succ} adversaries for {embs.size(0)} identities')
         # Compute the adversarial images according to the computed deltas
-        adv_lat_codes = LAT_CODES[successes] + deltas[successes]
+        adv_lat_cds = LAT_CODES[successes] + deltas[successes]
         # Pad input (if necessary)
-        to_pad = GENERATOR.batch_size - adv_lat_codes.size(0) % GENERATOR.batch_size
-        pad_inp = torch.cat([adv_lat_codes, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+        btch_size = GENERATOR.batch_size
+        to_pad = btch_size - adv_lat_cds.size(0) % btch_size
+        pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
         adv_embs, adv_ims = lat2embs(net, pad_inp, with_tqdm=True)
         # Extract (since we padded)
         adv_embs, adv_ims = adv_embs[:n_succ], adv_ims[:n_succ]
@@ -459,6 +464,7 @@ def main():
         expctd_labels = torch.nonzero(successes).squeeze()
         curr_labels = torch.argmin(curr_dists, 1)
         where_adv = expctd_labels != curr_labels
+        import pdb; pdb.set_trace()
         assert torch.all(where_adv), 'All these instances should be adversaries'
 
         # Extract the original images and the identities with 
