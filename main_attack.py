@@ -438,7 +438,7 @@ def main():
         successes.append(succ)
         deltas.append(curr_deltas)
 
-    # Store adversaries
+    # Store adversaries and ths successes
     deltas, successes = torch.cat(deltas), torch.cat(successes)
     torch.save(deltas, osp.join(args.output_dir, 'deltas.pth'))
     torch.save(successes, osp.join(args.output_dir, 'successes.pth'))
