@@ -445,9 +445,9 @@ def main():
     
     n_succ = successes.sum()
     if n_succ == 0:
-        LOGGER.info(f'Didnt find any adversary! :(')
+        LOGGER.info('Didnt find any adversary! :(')
     else:
-        LOGGER.info(f'Total: {n_succ} adversaries for {embs.size(0)} identities')
+        LOGGER.info(f'Total: {n_succ} advs for {embs.size(0)} identities')
         # Compute the adversarial images according to the computed deltas
         adv_lat_cds = LAT_CODES[successes] + deltas[successes]
         # Pad input (if necessary)
