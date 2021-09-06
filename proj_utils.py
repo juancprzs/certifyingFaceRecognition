@@ -405,8 +405,20 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
     return proj_ell.T, proj_subs.T
 
 
+def in_subs(v, proj_mat):
+        dists2subs = torch.norm(proj_mat @ v - v, p=2, dim=0)
+        whch_out = dists2subs > 0.
+        return torch.allclose(dists2subs[whch_out], torch.tensor(0.), atol=1e-4)
+
+
+def in_ellps(v, ellipse_mat):
+    dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
+    whch_out = dists > 1.
+    return torch.allclose(dists[whch_out], torch.tensor(1.), atol=1e-4)
+
+
 def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None, 
-        on_surface=False, max_iters=10):
+        on_surface=False, max_iters=5):
     '''
     vs: vectors to project (d x n1)
     proj_mat: matrix to project vectors to subspace spanned by directions (cols 
@@ -415,57 +427,47 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
     check: boolean stating whether projections are to be checked
     dirs: matrix of vectors establishing directions of interest (d x n2)
     '''
-    def in_subs(v):
-        return torch.allclose(proj_mat @ v, v, atol=1e-4)
-
-    def in_ellipsoid(v):
-        dist = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
-        which_out = dist > 1.
-        return torch.allclose(dist[which_out], torch.tensor(1.), atol=1e-4)
-    # Project to space spanned by dirs
-    vs = vs.T
-    proj_subs = proj_mat @ vs # Project vector to subspace
-    if on_surface:
-        dists = sq_distance(ellipse_mat, proj_subs.T.unsqueeze(dim=2))
-        sqrt_dist = torch.sqrt(dists.reshape(1, -1))
-        whr_vld = (sqrt_dist > 0).squeeze() # Where division is valid
-        proj_subs[:,whr_vld] = proj_subs[:,whr_vld]/(sqrt_dist[:,whr_vld]+1e-4)
+    def proj2surf(v):
+        dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
+        sqrt_dists = torch.sqrt(dists.reshape(1, -1))
+        return v / (sqrt_dists + 1e-5)
     
-    # The projection of query vector onto the ellipse
+    vs = vs.T
+    # Project to subspace (as spanned by dirs)
+    proj_subs = proj_mat @ vs # Project vector to subspace
+
+    # Projection ON the ellipse (if requested)
+    if on_surface: proj_subs = proj2surf(proj_subs)
+    
+    # Projection INSIDE the ellipse
     proj_ell, _, _ = proj_ellipse_pytorch(proj_subs, ellipse_mat)
+
     # Iterate until max_iters if needed
     curr_iters = 0
-    while not (in_subs(proj_ell) and in_ellipsoid(proj_ell)):
-        if curr_iters == max_iters: break    
+    while not (in_subs(proj_ell, proj_mat) and in_ellps(proj_ell, ellipse_mat)):
+        if curr_iters == max_iters: break
         curr_iters += 1
         # The projection of query vector onto the ellipse
         proj_ell, _, _ = proj_ellipse_pytorch(proj_ell, ellipse_mat)
         proj_ell = proj_mat @ proj_ell # Project vector to subspace
     
     # Final projection for vectors that are still a bit outside
-    '''
-    entered = False
-    if not (in_subs(proj_ell) and in_ellipsoid(proj_ell)):
+    if not (in_subs(proj_ell, proj_mat) and in_ellps(proj_ell, ellipse_mat)):
+        # Compute which ones are outside
         dists = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
-        sqrt_dist = torch.sqrt(dists.reshape(1, -1))
-        whr_need = (sqrt_dist >= 1).squeeze() # Where division is needed
-        proj_ell[:,whr_need] = proj_ell[:,whr_need]/(sqrt_dist[:,whr_need]+1e-2)
-        entered = True
-    '''
+        whr_need = (torch.sqrt(dists.reshape(1, -1)) >= 1).squeeze()
+        proj_ell[:, whr_need] = proj2surf(proj_ell[:, whr_need])
 
     if check:
         assert dirs is not None, \
             "Must provide 'dirs' if want to check projection"
         # Check for subspace
         assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
-            'Projection to subspace is wrong'
-        # import pdb; pdb.set_trace()
-        assert torch.allclose(proj_mat @ proj_ell, proj_ell, atol=1e-4), \
-            'Points inside ellipse should also be on the subspace'
+            'Projection matrix to subspace is wrong'
+        assert in_subs(proj_ell, proj_mat), 'Points inside ellipse should ' \
+            'also be on the subspace'
         # Check for ellipse
-        ellps_dist = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
-        assert torch.allclose(ellps_dist[ellps_dist > 1.], torch.tensor(1.), 
-            atol=1e-4), 'Some points outside ellipsoid!'
+        assert in_ellps(proj_ell, ellipse_mat), 'Some points outside ellipsoid!'
     
     return proj_ell.T, proj_subs.T
 

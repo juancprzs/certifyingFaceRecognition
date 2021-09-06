@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os.path as osp
 from tqdm import tqdm
+from time import time
 from glob import glob
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -24,7 +25,7 @@ from facenet_pytorch import InceptionResnetV1
 from utils.logger import setup_logger
 from models.mod_stylegan_generator import ModStyleGANGenerator
 from proj_utils import (get_projection_matrices, sample_ellipsoid,
-    project_to_region_pytorch, set_seed)
+    project_to_region_pytorch, set_seed, in_subs, in_ellps)
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -92,14 +93,18 @@ def parse_args():
     parser.add_argument('--output-dir', type=str, required=True,
                         help='Directory to save the output results. (required)')
     parser.add_argument('--face-recog-method', type=str, default='insightface', 
-                        choices=FRS_METHODS, help='Face recognition system to use')
+                        choices=FRS_METHODS, 
+                        help='Face recognition system to use')
     parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
                         help='Optimizer to use')
     parser.add_argument('--iters', type=int, default=100, 
                         help='Optimization iterations per instance')
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    args.output_dir = osp.join('exp_results', args.output_dir)
+    return args
 
 
 def args2text(args):
@@ -109,7 +114,7 @@ def args2text(args):
 
 
 args = parse_args()
-
+start = time()
 
 # Script argument-dependent constants
 IMG_SIZE = INP_RESOLUTIONS[args.face_recog_method]
@@ -394,20 +399,24 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
         all_dists = get_dists(embs, orig_embs, method=frs_method)
         preds = torch.argmin(all_dists, 1)
         success = preds != labels
-        if torch.all(success):
-            break
+        if torch.all(success): break
         # Compute loss
         loss = compute_loss(all_dists, labels, loss_type=loss_type)
-        # Backward and optim step
+        # Backward
         optim.zero_grad()
         loss.backward()
+        # Optim step without forgetting previous values
+        old_deltas = torch.clone(deltas).detach()
         optim.step()
         # Projection
         with torch.no_grad():
-            proj, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
+            deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
                 check=True, dirs=DIRS, on_surface=False)
-            # Modify deltas for which attack has not been successful yet
-            deltas[~success] = proj[~success]
+            # Re-establish old values for deltas that were already succesful
+            deltas[success] = old_deltas[success]
+
+    # Final check of deltas
+    assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
 
     return deltas.detach().cpu(), success
 
@@ -415,11 +424,11 @@ def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
 def main():
     # DNN
     net = get_net(method=args.face_recog_method)
-    LOGGER.info(f'Generating original images and embeddings')
+    LOGGER.info('Generating original images and embeddings')
     embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
     embs = embs.to(DEVICE)
     # --------------------------------------------------------------------------
-    LOGGER.info(f'Computing adversaries')
+    LOGGER.info('Computing adversaries')
     n_succ, tot = 0, 0
     deltas, successes = [], []
     pbar = tqdm(GENERATOR.get_batch_inputs(LAT_CODES))
@@ -443,7 +452,6 @@ def main():
     torch.save(deltas, osp.join(args.output_dir, 'deltas.pth'))
     torch.save(successes, osp.join(args.output_dir, 'successes.pth'))
     
-    n_succ = successes.sum()
     if n_succ == 0:
         LOGGER.info('Didnt find any adversary! :(')
     else:
@@ -461,11 +469,9 @@ def main():
         # Check where the predictions differ from the labels
         curr_dists = get_dists(adv_embs.to(DEVICE), embs, 
             method=args.face_recog_method)
-        expctd_labels = torch.nonzero(successes).squeeze()
         curr_labels = torch.argmin(curr_dists, 1)
+        expctd_labels = torch.nonzero(successes).squeeze()
         where_adv = expctd_labels != curr_labels
-        import pdb; pdb.set_trace()
-        assert torch.all(where_adv), 'All these instances should be adversaries'
 
         # Extract the original images and the identities with 
         # which the people are being confused
@@ -488,6 +494,12 @@ def main():
             path = osp.join(args.output_dir, f'id_{idx}.png')
             plt.savefig(path, bbox_inches='tight', dpi=400)
             plt.close()
+        
+        if not torch.all(where_adv):
+            LOGGER.info('Something is wrong with the adversaries!')
+
+    tot_time = time() - start
+    LOGGER.info(f'Total time spent: {tot_time}s')
 
         
     if PLOT:

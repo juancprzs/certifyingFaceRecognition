@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --partition=batch
-#SBATCH --array=[9,99]
-#SBATCH -J lr1e-3
-#SBATCH -o logs/lr1e-3.%J.out
-#SBATCH -e logs/lr1e-3.%J.err
+#SBATCH --array=[0-5]
+#SBATCH -J adam_xent
+#SBATCH -o logs/adam_xent.%J.out
+#SBATCH -e logs/adam_xent.%J.err
 #SBATCH --time=12:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
@@ -15,8 +15,6 @@
 source venv/bin/activate
 
 python main_attack.py \
---output-dir lr1e-3_m0.${SLURM_ARRAY_TASK_ID} \
---lr 1e-3 \
---momentum 0.${SLURM_ARRAY_TASK_ID} \
---loss xent \
---optim SGD
+--output-dir adam_lr1e-${SLURM_ARRAY_TASK_ID} \
+--lr 1e-${SLURM_ARRAY_TASK_ID} \
+--loss xent
