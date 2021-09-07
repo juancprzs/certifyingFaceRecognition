@@ -1,5 +1,4 @@
 import torch
-import argparse
 import numpy as np
 import pandas as pd
 import os.path as osp
@@ -12,7 +11,6 @@ import matplotlib.image as mpimg
 # Torch imports
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import SGD, Adam
 import torch.backends.cudnn as cudnn
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import InterpolationMode
@@ -22,7 +20,7 @@ from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 from models.iresnet import iresnet50
 from facenet_pytorch import InceptionResnetV1
 # Local imports
-from utils.logger import setup_logger
+from attack_utils.gen_utils import get_transform, eval_chunk
 from models.mod_stylegan_generator import ModStyleGANGenerator
 from proj_utils import (get_projection_matrices, sample_ellipsoid,
     project_to_region_pytorch, set_seed, in_subs, in_ellps)
@@ -38,12 +36,9 @@ cudnn.deterministic = True
 OPTIMS = ['Adam', 'SGD']
 FRS_METHODS = ['insightface', 'facenet']
 LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
-INP_RESOLUTIONS = { 'insightface' : 112, 'facenet' : 160 }
 
 # # Script constants
 # Misc
-STD = 0.5
-MEAN = 0.5
 PLOT = False
 EMB_SIZE = 512
 LAT_SPACE = 'w'
@@ -60,18 +55,6 @@ ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
 DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_png_perts/data'
 
-def get_transform():
-    def resize(x):
-        x = x.unsqueeze(0) if x.ndim != 4 else x
-        interp = F.interpolate(x, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', 
-            align_corners=False)
-        return interp.squeeze(0)
-
-    normalize = Normalize((MEAN, MEAN, MEAN), (STD, STD, STD))
-    return Compose([resize, normalize])
-# Transforms
-TRANSFORM = get_transform()
-
 PROJ_MAT, ELLIPSE_MAT, DIRS, _ = get_projection_matrices(dataset=DATASET, 
     gan_name=GAN_NAME)
 DIRS = torch.tensor(DIRS, dtype=torch.float32, device=DEVICE)
@@ -79,49 +62,10 @@ PROJ_MAT = torch.tensor(PROJ_MAT, dtype=torch.float32, device=DEVICE)
 ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE) 
 assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
 assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
-set_seed(DEVICE, seed=2)
 
 
-# # Input arguments
-def parse_args():
-    parser = argparse.ArgumentParser(description='Compute semantic adversaries')
-    parser.add_argument('--lr', type=float, default=1e-2, help='Learning rate')
-    parser.add_argument('--momentum', type=float, default=0.9, 
-                        help='Momentum for SGD')
-    parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
-                        help='Loss to optimize')
-    parser.add_argument('--output-dir', type=str, required=True,
-                        help='Directory to save the output results. (required)')
-    parser.add_argument('--face-recog-method', type=str, default='insightface', 
-                        choices=FRS_METHODS, 
-                        help='Face recognition system to use')
-    parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
-                        help='Optimizer to use')
-    parser.add_argument('--iters', type=int, default=100, 
-                        help='Optimization iterations per instance')
-    parser.add_argument('--not-on-surf', action='store_true', default=False,
-                        help='Random initialization is NOT on region surface')
-    args = parser.parse_args()
-
-    args.output_dir = osp.join('exp_results', args.output_dir)
-    return args
-
-
-def args2text(args):
-    d = vars(args)
-    text = ' | '.join([str(key) + ': ' + str(d[key]) for key in d])
-    return text
-
-
-args = parse_args()
-start = time()
-
-# Script argument-dependent constants
-IMG_SIZE = INP_RESOLUTIONS[args.face_recog_method]
 
 # The model and the latent codes
-LOGGER = setup_logger(args.output_dir, logger_name='generate_data')
-LOGGER.info(args2text(args))
 LOGGER.info(f'Initializing generator.')
 GENERATOR = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
 GENERATOR.model.eval()
@@ -216,24 +160,6 @@ def get_net(method='insightface'):
     return net.to(DEVICE).eval()
 
 
-def get_optim(deltas, optim_name='SGD', lr=0.001, momentum=0.9):
-    if optim_name == 'SGD':
-        optim = SGD([deltas], lr=lr, momentum=momentum)
-    elif optim_name == 'Adam':
-        optim = Adam([deltas], lr=lr)
-
-    return optim
-
-
-def get_dists(embs1, embs2, method='insightface'):
-    if method == 'insightface':
-        # Use special compute mode for numerical stability
-        return torch.cdist(embs1, embs2, 
-            compute_mode='donot_use_mm_for_euclid_dist')
-    else:
-        return 1 - torch.matmul(embs1, embs2.T)
-
-
 def get_embs(net, dataloader, original=True, to_cpu=True):
     
     def check_ims(names):
@@ -294,24 +220,6 @@ def compute_embs(net, original=False, dataset=None, with_grad=False):
     return embs, others
 
 
-def lat2embs(net, lat_codes, few=False, with_tqdm=False):
-    all_ims, all_embs = [], []
-    itr = GENERATOR.get_batch_inputs(lat_codes)
-    if with_tqdm: itr = tqdm(itr)
-    for batch in itr:
-        with torch.set_grad_enabled(few):
-            # Forward and store
-            ims = GENERATOR.easy_synthesize(batch.to(DEVICE), **KWARGS)['image']
-            all_ims.append(ims if few else ims.detach().cpu())
-            # Transform, forward and store
-            ims = TRANSFORM(ims)
-            ims = ims.unsqueeze(0) if ims.ndim == 3 else ims
-            embs = net(ims)
-            all_embs.append(embs if few else embs.detach().cpu())
-
-    return torch.cat(all_embs), torch.cat(all_ims)
-
-
 def get_pairwise_dists(embs1, embs2, method='insightface'):
     if method == 'insightface':
         diff = embs1 - embs2
@@ -321,133 +229,31 @@ def get_pairwise_dists(embs1, embs2, method='insightface'):
         return 1 - dot
 
 
-def compute_loss(all_dists, labels, loss_type='away', use_probs=True, 
-        scale_dists=True):
-    if use_probs:
-        if scale_dists:
-            all_dists = all_dists / np.sqrt(EMB_SIZE)
-        vals = F.softmax(-all_dists, dim=1)
-    else:
-        vals = all_dists
-    
-    # -----------   Get val to target
-    target_val = torch.gather(vals, 1, labels.view(-1, 1))
-    # -----------   Get val to highest-performing class != target
-    value = -1 if use_probs else float('inf')
-    mod_vals = torch.scatter(vals, 1, labels.view(-1, 1), value)
-    if use_probs: # If they're probabilities, we are looking for the max
-        nearest_val, _ = torch.max(mod_vals, 1)
-    else: # If they're distances, we are looking for the min
-        nearest_val, _ = torch.min(mod_vals, 1)
-
-    # -----------   The losses themselves
-    # --> 'away' loss
-    if loss_type == 'away':
-        if use_probs: # If it's a probability, we want to MINIMIZE it
-            coeff = +1.
-        else: # Otherwise we want to MAXIMIZE it
-            coeff = -1.
-        return coeff * target_val.mean()
-    # --> 'nearest' loss
-    if loss_type == 'nearest':
-        if use_probs: # If it's a probability, we want to MAXIMIZE it
-            coeff = -1.
-        else: # Otherwise we want to MAXIMIZE it
-            coeff = +1.
-        return coeff * nearest_val.mean()
-    # --> 'diff' loss
-    if loss_type == 'diff':
-        diff = target_val - nearest_val
-        if use_probs: # If it's a probability, we want to MINIMIZE it
-            coeff = +1.
-        else: # Otherwise we want to MAXIMIZE it
-            coeff = -1.
-        return coeff * diff.mean()
-    # --> 'xent' loss
-    if loss_type == 'xent':
-        assert use_probs, 'xent loss should be used together with probs'
-        if scale_dists:
-            scores = -all_dists / np.sqrt(EMB_SIZE)
-        else:
-            scores = -all_dists
-        xent = F.cross_entropy(input=scores, target=labels, 
-            reduction='none')
-        # It's the cross-entropy loss, so we want to maximize it
-        return -1. * xent.mean()
-
-
-def find_adversaries(net, lat_codes, labels, orig_embs, optim_name, lr, iters,
-        momentum, frs_method, loss_type, random_init=True, 
-        rand_init_on_surf=True):
-    # Initialize deltas
-    if random_init:
-        # Sample from ellipsoid and project
-        deltas = sample_ellipsoid(ELLIPSE_MAT, n_vecs=lat_codes.size(0))
-        deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, 
-            ELLIPSE_MAT, check=True, dirs=DIRS, on_surface=rand_init_on_surf)
-        # Transform to tensor
-        deltas = deltas.clone().detach().requires_grad_(True)
-    else:
-        deltas = torch.zeros_like(lat_codes, requires_grad=True)
-    
-    # Their corresponding optimizer
-    optim = get_optim(deltas, optim_name=optim_name, lr=lr, momentum=momentum)
-    for idx_iter in range(iters):
-        # Get embeddings from perturbed latent codes
-        embs, _ = lat2embs(net, lat_codes + deltas, few=True)
-        # Compute current predictions and check for attack success
-        all_dists = get_dists(embs, orig_embs, method=frs_method)
-        preds = torch.argmin(all_dists, 1)
-        success = preds != labels
-        if torch.all(success): break
-        # Compute loss
-        loss = compute_loss(all_dists, labels, loss_type=loss_type)
-        # Backward
-        optim.zero_grad()
-        loss.backward()
-        # Optim step without forgetting previous values
-        old_deltas = torch.clone(deltas).detach()
-        optim.step()
-        # Projection
-        with torch.no_grad():
-            deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
-                check=True, dirs=DIRS, on_surface=False)
-            # Re-establish old values for deltas that were already succesful
-            deltas[success] = old_deltas[success]
-
-    # Final check of deltas
-    assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
-
-    return deltas.detach().cpu(), success
-
-
-def main():
+def main(args):
+    start = time()
     # DNN
     net = get_net(method=args.face_recog_method)
-    LOGGER.info('Generating original images and embeddings')
+    # Embeddings of original images
+    args.LOGGER.info('Generating original images and embeddings')
     embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
     embs = embs.to(DEVICE)
-    # --------------------------------------------------------------------------
-    LOGGER.info('Computing adversaries')
-    n_succ, tot = 0, 0
-    deltas, successes = [], []
-    pbar = tqdm(GENERATOR.get_batch_inputs(LAT_CODES))
-    for idx, btch_cods in enumerate(pbar):
-        batch_size = btch_cods.size(0)
-        labels = torch.arange(idx*batch_size, (idx+1)*batch_size, device=DEVICE)
-        curr_deltas, succ = find_adversaries(
-            net, btch_cods.to(DEVICE), labels, embs, optim_name=args.optim, 
-            lr=args.lr, iters=args.iters, momentum=args.momentum, 
-            frs_method=args.face_recog_method, loss_type=args.loss, 
-            random_init=True, rand_init_on_surf=not args.not_on_surf
-        )
-        tot += batch_size
-        n_succ += succ.sum()
-        pbar.set_description(f'-> {n_succ} adversaries for {tot} identities')
-        successes.append(succ)
-        deltas.append(curr_deltas)
+    # Evaluate either all chunks or a single one
+    if args.num_chunk is None: # evaluate sequentially
+        log_files = []
+        for num_chunk in range(1, args.chunks+1):
+            set_seed(DEVICE, seed=args.seed + num_chunk)
+            log_file = eval_chunk(net, num_chunk, DEVICE, args)
+            log_files.append(log_file)
 
-    # Store adversaries and ths successes
+        eval_files(log_files, args.final_results)
+    else: # evaluate a single chunk and exit
+        set_seed(DEVICE, seed=args.seed + num_chunk)
+        log_file = eval_chunk(net, args.num_chunk, DEVICE, args)
+
+    tot_time = time() - start
+    args.LOGGER.info(f'Finished. Total time spent: {tot_time}s')
+
+    # Store adversaries and the successes
     deltas, successes = torch.cat(deltas), torch.cat(successes)
     torch.save(deltas, osp.join(args.output_dir, 'deltas.pth'))
     torch.save(successes, osp.join(args.output_dir, 'successes.pth'))
@@ -498,8 +304,7 @@ def main():
         if not torch.all(where_adv):
             LOGGER.info('Something is wrong with the adversaries!')
 
-    tot_time = time() - start
-    LOGGER.info(f'Total time spent: {tot_time}s')
+    
 
         
     if PLOT:
@@ -664,4 +469,13 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from attack_utils.opts import parse_args
+    args = parse_args()
+    if args.eval_files:
+        from glob import glob
+        log_files = glob(osp.join(args.logs_dir, 
+                         'results_chunk*of*_*to*.txt'))
+        eval_files(log_files, args.final_results)
+        sys.exit()
+    else:
+        main(args)
