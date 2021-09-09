@@ -385,7 +385,6 @@ if __name__ == '__main__':
         from glob import glob
         log_files = glob(osp.join(args.logs_dir, 'results_chunk*of*.txt'))
         eval_files(log_files, args)
-        sys.exit()
     else:
         # The model and the latent codes
         args.LOGGER.info(f'Initializing generator.')
