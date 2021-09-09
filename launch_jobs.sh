@@ -17,6 +17,7 @@ source venv/bin/activate
 python main_attack.py \
 --chunks 25 \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
---output-dir debugging \
+--output-dir debugging_fewer \
 --lr 1e-0 \
---loss xent
+--loss xent \
+--iters 15
