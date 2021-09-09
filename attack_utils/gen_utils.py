@@ -39,7 +39,7 @@ assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)
+    return torch.from_numpy(lat_codes)[:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -105,7 +105,6 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
     all_ims = [] if return_ims else None
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
-    print(f'Before the for-loop. Total of {len(lat_codes)} latent codes. Few={few}')
     tot_codes = 0
     for batch in itr:
         with torch.set_grad_enabled(few):
@@ -120,18 +119,14 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
             all_embs.append(embs if few else embs.detach().cpu())
         
         tot_codes += batch.size(0)
-        print(f'A total of {tot_codes} codes processed until now')
-
-    print('Concat of all embs')
-    all_embs = torch.cat(all_embs)
-    print('Done concat of embs')
+        # print(f'A total of {tot_codes} codes processed until now')
 
     if return_ims:
         print('Concat of all ims')
         all_ims = torch.cat(all_ims)
         print('Done concat of ims')
         
-    return all_embs, all_ims
+    return torch.cat(all_embs), all_ims
 
 
 def compute_loss(all_dists, labels, loss_type='away', use_probs=True, 
@@ -189,8 +184,8 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return -1. * xent.mean()
 
 
-def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, lr, iters,
-        momentum, frs_method, loss_type, transform, random_init=True, 
+def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, 
+        lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
         rand_init_on_surf=True):
     # Initialize deltas
     if random_init:
@@ -235,23 +230,33 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, l
     return deltas.detach().cpu(), success
 
 
-def get_curr_preds(generator, net, embs, curr_lats, deltas, successes, 
-        transform, device, args):
-    n_succ = successes.sum()
-    # Compute the adversarial images according to the computed deltas
-    adv_lat_cds = curr_lats[successes] + deltas[successes]
+def get_curr_preds(generator, net, embs, curr_lats, deltas, transform, device, 
+        args):
+    n = curr_lats.size(0)
+    # Compute the ORIGINAL images
+    # Pad input (if necessary)
+    to_pad = generator.batch_size - curr_lats.size(0) % generator.batch_size
+    pad_inp = torch.cat([curr_lats, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+    orig_embs, orig_ims = lat2embs(generator, net, pad_inp, transform, 
+        with_tqdm=True, return_ims=True)
+    # Extract (since we padded)
+    orig_embs, orig_ims = orig_embs[:n], orig_ims[:n]
+
+    # Compute the ADVERSARIAL images according to the computed deltas
+    adv_lat_cds = curr_lats + deltas
     # Pad input (if necessary)
     to_pad = generator.batch_size - adv_lat_cds.size(0) % generator.batch_size
     pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
     adv_embs, adv_ims = lat2embs(generator, net, pad_inp, transform, 
-        with_tqdm=True)
+        with_tqdm=True, return_ims=True)
     # Extract (since we padded)
-    adv_embs, adv_ims = adv_embs[:n_succ], adv_ims[:n_succ]
+    adv_embs, adv_ims = adv_embs[:n], adv_ims[:n]
+
     # Get the current predictions according to the distances
     curr_dists = get_dists(adv_embs.to(device), embs, 
         method=args.face_recog_method)
     curr_preds = torch.argmin(curr_dists, 1)
-    return adv_embs, adv_ims, curr_preds
+    return adv_embs, adv_ims, curr_preds, orig_embs, orig_ims
 
 
 def check_advs(labels, curr_preds, successes, args):
@@ -326,7 +331,6 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
     # Extract the actual chunk
     start = num_chunk * chunk_length
     lat_cods_chunk = lat_codes[start:(start+chunk_length)]
-    ims_chunk = ims[start:(start+chunk_length)]
     # Iterate through batches
     deltas, successes, all_labels = [], [], []
     pbar = tqdm(generator.get_batch_inputs(lat_cods_chunk))
@@ -361,20 +365,28 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
     if n_succ == 0: # No successes
         args.LOGGER.info('Didnt find any adversary! =(')
     else:
-        # Get the networks output on the current adversarial examples
-        adv_embs, adv_ims, curr_preds = get_curr_preds(generator, net, embs, 
-            lat_cods_chunk, deltas, successes, transform, device, args)
+        # Get the output on the images for which deltas were found
+        succ_lat_codes = lat_cods_chunk[successes]
+        succ_deltas = deltas[successes]
+        adv_embs, adv_ims, curr_preds, _, orig_ims = get_curr_preds(
+            generator, net, embs, succ_lat_codes, 
+            succ_deltas, transform, device, args
+        )
         # Check they are indeed adversarial
         assert check_advs(labels, curr_preds, successes, args)
-        # Store adversaries and the successes
-        # Extract the original images and the identities with which the people 
-        # are being confused
-        orig, confu = ims_chunk[successes], ims[curr_preds]
+        # Compute images of the IDs with which people are being confused
+        lat_cods_conf = lat_codes[curr_preds]
+        _, conf_adv_ims, _, _, conf_ims = get_curr_preds(
+            generator, net, embs, lat_cods_conf, 
+            torch.zeros_like(lat_cods_conf), transform, device, args
+        )
+        assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
-        plot_advs(orig, adv_ims, confu, args)
+        plot_advs(orig_ims, adv_ims, conf_ims, args)
     
     # Log the results
     results = { 'successes' : n_succ, 'instances' :  len(all_labels) }
+    # Store adversaries and the successes
     log_file = save_results(results, deltas, successes, num_chunk, args)
     return log_file
 
