@@ -114,7 +114,14 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
             embs = net(ims)
             all_embs.append(embs if few else embs.detach().cpu())
 
-    return torch.cat(all_embs), torch.cat(all_ims)
+    print('Concat of all embs')
+    all_embs = torch.cat(all_embs)
+    print('Done concat of embs')
+
+    print('Concat of all ims')
+    all_ims = torch.cat(all_ims)
+    print('Done concat of ims')
+    return all_embs, all_ims
 
 
 def compute_loss(all_dists, labels, loss_type='away', use_probs=True, 
