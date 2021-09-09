@@ -67,9 +67,8 @@ def parse_args():
     # final results
     args.final_results = osp.join(args.output_dir, f'results.txt')
 
-    if not args.eval_files:
-        args.LOGGER = setup_logger(osp.join(args.output_dir, f'chunk_{chunk}'), 
-            logger_name=f'chunk_{chunk}')
-        args.LOGGER.info(args2text(args))
+    args.LOGGER = setup_logger(osp.join(args.output_dir, f'chunk_{chunk}'), 
+        logger_name=f'chunk_{chunk}')
+    args.LOGGER.info(args2text(args))
 
     return args
