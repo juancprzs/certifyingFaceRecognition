@@ -121,10 +121,7 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
         tot_codes += batch.size(0)
         # print(f'A total of {tot_codes} codes processed until now')
 
-    if return_ims:
-        print('Concat of all ims')
-        all_ims = torch.cat(all_ims)
-        print('Done concat of ims')
+    if return_ims: all_ims = torch.cat(all_ims)
         
     return torch.cat(all_embs), all_ims
 
