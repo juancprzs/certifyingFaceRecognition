@@ -18,5 +18,5 @@ python main_attack.py \
 --chunks 25 \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --output-dir adam_xent_lr1e-0 \
---lr 1e+1 \
+--lr 1e-0 \
 --loss xent
