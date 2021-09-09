@@ -109,7 +109,7 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
         with torch.set_grad_enabled(few):
             # Forward and store
             ims = generator.easy_synthesize(batch.to(DEVICE), **KWARGS)['image']
-            all_ims.append(ims if few else ims.detach().cpu())
+            # all_ims.append(ims if few else ims.detach().cpu())
             # Transform, forward and store
             ims = transform(ims)
             ims = ims.unsqueeze(0) if ims.ndim == 3 else ims
