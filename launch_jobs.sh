@@ -6,7 +6,7 @@
 #SBATCH -o logs/adam_xent.%J.out
 #SBATCH -e logs/adam_xent.%J.err
 #SBATCH --time=4:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=50G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
 #SBATCH --mail-user=perezjc@kaust.edu.sa
