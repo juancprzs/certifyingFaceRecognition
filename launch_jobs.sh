@@ -2,9 +2,9 @@
 #SBATCH -N 1
 #SBATCH --partition=batch
 #SBATCH --array=[0-24]
-#SBATCH -J adam_xent
-#SBATCH -o logs/adam_xent.%J.out
-#SBATCH -e logs/adam_xent.%J.err
+#SBATCH -J adam_xent_lr1e-0
+#SBATCH -o logs/adam_xent_lr1e-0.%J.out
+#SBATCH -e logs/adam_xent_lr1e-0.%J.err
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
@@ -19,5 +19,4 @@ python main_attack.py \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --output-dir debugging_fewer \
 --lr 1e-0 \
---loss xent \
---iters 2
+--loss xent
