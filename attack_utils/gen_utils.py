@@ -104,6 +104,7 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
     print(f'Before the for-loop. Total of {len(lat_codes)} latent codes')
+    tot_codes = 0
     for batch in itr:
         with torch.set_grad_enabled(few):
             # Forward and store
@@ -114,6 +115,9 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
             ims = ims.unsqueeze(0) if ims.ndim == 3 else ims
             embs = net(ims)
             all_embs.append(embs if few else embs.detach().cpu())
+        
+        tot_codes += batch.size(0)
+        print(f'A total of {tot_codes} codes processed until now')
 
     print('Concat of all embs')
     all_embs = torch.cat(all_embs)
