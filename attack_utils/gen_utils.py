@@ -382,7 +382,8 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         )
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
-        plot_advs(orig_ims, adv_ims, conf_ims, args)
+        plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
+            conf_ims, args)
     
     # Log the results
     results = { 'successes' : n_succ, 'instances' :  len(all_labels) }
