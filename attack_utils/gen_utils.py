@@ -382,6 +382,7 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         )
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
+        import pdb; pdb.set_trace()
         plot_advs(orig_ims, adv_ims, conf_ims, args)
     
     # Log the results

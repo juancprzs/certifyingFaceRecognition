@@ -20,4 +20,4 @@ python main_attack.py \
 --output-dir debugging_fewer \
 --lr 1e-0 \
 --loss xent \
---iters 5
+--iters 2
