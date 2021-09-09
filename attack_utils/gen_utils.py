@@ -39,7 +39,7 @@ assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)[:80]
+    return torch.from_numpy(lat_codes)
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
