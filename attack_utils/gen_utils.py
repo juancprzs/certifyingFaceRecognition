@@ -373,8 +373,7 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
             succ_deltas, transform, device, args
         )
         # Check they are indeed adversarial
-        import pdb; pdb.set_trace()
-        assert check_advs(labels, curr_preds, successes, args)
+        assert check_advs(all_labels[successes], curr_preds, successes, args)
         # Compute images of the IDs with which people are being confused
         lat_cods_conf = lat_codes[curr_preds]
         _, conf_adv_ims, _, _, conf_ims = get_curr_preds(
