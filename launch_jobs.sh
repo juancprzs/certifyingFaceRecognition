@@ -12,7 +12,6 @@
 #SBATCH --mail-user=perezjc@kaust.edu.sa
 #SBATCH --mail-type=ALL
 
-conda activate upd_pt
 source venv/bin/activate
 
 python main_attack.py \
