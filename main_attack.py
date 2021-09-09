@@ -20,10 +20,11 @@ from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 from models.iresnet import iresnet50
 from facenet_pytorch import InceptionResnetV1
 # Local imports
-from attack_utils.gen_utils import get_transform, eval_chunk
 from models.mod_stylegan_generator import ModStyleGANGenerator
-from proj_utils import (get_projection_matrices, sample_ellipsoid,
-    project_to_region_pytorch, set_seed, in_subs, in_ellps)
+from attack_utils.gen_utils import (get_transform, eval_chunk, lat2embs, 
+    eval_files, get_latent_codes, EMB_SIZE, INP_RESOLS, MEAN, STD, DEVICE, 
+    KWARGS, GAN_NAME, DATASET)
+from attack_utils.proj_utils import set_seed
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -33,47 +34,15 @@ assert torch.cuda.is_available()
 cudnn.benchmark = False
 cudnn.deterministic = True
 
-OPTIMS = ['Adam', 'SGD']
-FRS_METHODS = ['insightface', 'facenet']
-LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
-
 # # Script constants
 # Misc
 PLOT = False
-EMB_SIZE = 512
-LAT_SPACE = 'w'
 BATCH_SIZE = 32
 N_SHOW_ERRS = 5
-DATASET = 'ffhq'
-IMAGE_EXT = 'png'
-GAN_NAME = 'stylegan'
-DEVICE = torch.device('cuda')
+
 # Paths
-ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
-ORIG_IMAGES_PATH = osp.join(ORIG_DATA_PATH, 'ims')
-ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
 WEIGHTS_PATH = 'weights/ms1mv3_arcface_r50/backbone.pth'
 DATA_PATH = f'results/{GAN_NAME}_{DATASET}_recog_png_perts/data'
-
-PROJ_MAT, ELLIPSE_MAT, DIRS, _ = get_projection_matrices(dataset=DATASET, 
-    gan_name=GAN_NAME)
-DIRS = torch.tensor(DIRS, dtype=torch.float32, device=DEVICE)
-PROJ_MAT = torch.tensor(PROJ_MAT, dtype=torch.float32, device=DEVICE)
-ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE) 
-assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
-assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
-
-
-
-# The model and the latent codes
-LOGGER.info(f'Initializing generator.')
-GENERATOR = ModStyleGANGenerator('stylegan_ffhq', LOGGER)
-GENERATOR.model.eval()
-KWARGS = { 'latent_space_type' : LAT_SPACE }
-LAT_CODES_PATH = osp.join(ORIG_DATA_PATH, f'{LAT_SPACE}.npy')
-LAT_CODES = torch.from_numpy(
-    GENERATOR.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-)
 
 
 class SimpleImageDataset(Dataset):
@@ -220,91 +189,32 @@ def compute_embs(net, original=False, dataset=None, with_grad=False):
     return embs, others
 
 
-def get_pairwise_dists(embs1, embs2, method='insightface'):
-    if method == 'insightface':
-        diff = embs1 - embs2
-        return torch.norm(diff, dim=1)
-    else:
-        dot = (embs1 * embs2).sum(dim=1)
-        return 1 - dot
-
-
 def main(args):
     start = time()
+    transform = get_transform(INP_RESOLS[args.face_recog_method], MEAN, STD)
     # DNN
     net = get_net(method=args.face_recog_method)
     # Embeddings of original images
     args.LOGGER.info('Generating original images and embeddings')
-    embs, all_ims = lat2embs(net, LAT_CODES, with_tqdm=True)
+    embs, ims = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
     embs = embs.to(DEVICE)
     # Evaluate either all chunks or a single one
     if args.num_chunk is None: # evaluate sequentially
         log_files = []
-        for num_chunk in range(1, args.chunks+1):
+        for num_chunk in range(args.chunks):
             set_seed(DEVICE, seed=args.seed + num_chunk)
-            log_file = eval_chunk(net, num_chunk, DEVICE, args)
+            log_file = eval_chunk(GENERATOR, net, LAT_CODES, ims, embs, 
+                transform, num_chunk, DEVICE, args)
             log_files.append(log_file)
 
-        eval_files(log_files, args.final_results)
+        eval_files(log_files, args)
     else: # evaluate a single chunk and exit
-        set_seed(DEVICE, seed=args.seed + num_chunk)
-        log_file = eval_chunk(net, args.num_chunk, DEVICE, args)
+        set_seed(DEVICE, seed=args.seed + args.num_chunk)
+        log_file = eval_chunk(GENERATOR, net, LAT_CODES, ims, embs, transform, 
+            args.num_chunk, DEVICE, args)
 
     tot_time = time() - start
     args.LOGGER.info(f'Finished. Total time spent: {tot_time}s')
-
-    # Store adversaries and the successes
-    deltas, successes = torch.cat(deltas), torch.cat(successes)
-    torch.save(deltas, osp.join(args.output_dir, 'deltas.pth'))
-    torch.save(successes, osp.join(args.output_dir, 'successes.pth'))
-    
-    if n_succ == 0:
-        LOGGER.info('Didnt find any adversary! :(')
-    else:
-        LOGGER.info(f'Total: {n_succ} advs for {embs.size(0)} identities')
-        # Compute the adversarial images according to the computed deltas
-        adv_lat_cds = LAT_CODES[successes] + deltas[successes]
-        # Pad input (if necessary)
-        btch_size = GENERATOR.batch_size
-        to_pad = btch_size - adv_lat_cds.size(0) % btch_size
-        pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
-        adv_embs, adv_ims = lat2embs(net, pad_inp, with_tqdm=True)
-        # Extract (since we padded)
-        adv_embs, adv_ims = adv_embs[:n_succ], adv_ims[:n_succ]
-
-        # Check where the predictions differ from the labels
-        curr_dists = get_dists(adv_embs.to(DEVICE), embs, 
-            method=args.face_recog_method)
-        curr_labels = torch.argmin(curr_dists, 1)
-        expctd_labels = torch.nonzero(successes).squeeze()
-        where_adv = expctd_labels != curr_labels
-
-        # Extract the original images and the identities with 
-        # which the people are being confused
-        orig, confu = all_ims[successes], all_ims[curr_labels]
-
-        # Show in a plot
-        LOGGER.info(f'Plotting adversaries')
-        for idx, (ori, adv, conf) in enumerate(zip(orig, adv_ims, confu)):
-            plt.figure()
-            plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
-            plt.axis('off'); plt.title('Original')
-
-            plt.subplot(132); plt.imshow(adv.cpu().permute(1, 2, 0).numpy())
-            plt.axis('off'); plt.title('Adversary')
-
-            plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
-            plt.axis('off'); plt.title('Prediction')
-
-            plt.tight_layout()
-            path = osp.join(args.output_dir, f'id_{idx}.png')
-            plt.savefig(path, bbox_inches='tight', dpi=400)
-            plt.close()
-        
-        if not torch.all(where_adv):
-            LOGGER.info('Something is wrong with the adversaries!')
-
-    
 
         
     if PLOT:
@@ -473,9 +383,13 @@ if __name__ == '__main__':
     args = parse_args()
     if args.eval_files:
         from glob import glob
-        log_files = glob(osp.join(args.logs_dir, 
-                         'results_chunk*of*_*to*.txt'))
-        eval_files(log_files, args.final_results)
+        log_files = glob(osp.join(args.logs_dir, 'results_chunk*of*.txt'))
+        eval_files(log_files, args)
         sys.exit()
     else:
+        # The model and the latent codes
+        args.LOGGER.info(f'Initializing generator.')
+        GENERATOR = ModStyleGANGenerator('stylegan_ffhq', args.LOGGER)
+        GENERATOR.model.eval()
+        LAT_CODES = get_latent_codes(GENERATOR)
         main(args)
