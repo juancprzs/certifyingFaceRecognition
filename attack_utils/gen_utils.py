@@ -101,7 +101,8 @@ def get_dists(embs1, embs2, method='insightface'):
 
 def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
         return_ims=False):
-    all_ims, all_embs = [], []
+    all_embs = []
+    all_ims = [] if return_ims else None
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
     print(f'Before the for-loop. Total of {len(lat_codes)} latent codes. Few={few}')
@@ -125,9 +126,11 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
     all_embs = torch.cat(all_embs)
     print('Done concat of embs')
 
-    print('Concat of all ims')
-    all_ims = torch.cat(all_ims)
-    print('Done concat of ims')
+    if return_ims:
+        print('Concat of all ims')
+        all_ims = torch.cat(all_ims)
+        print('Done concat of ims')
+        
     return all_embs, all_ims
 
 
