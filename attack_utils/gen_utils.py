@@ -99,7 +99,8 @@ def get_dists(embs1, embs2, method='insightface'):
         return 1 - torch.matmul(embs1, embs2.T)
     
 
-def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
+def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
+        return_ims=False):
     all_ims, all_embs = [], []
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
@@ -109,8 +110,8 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
         with torch.set_grad_enabled(few):
             # Forward and store
             ims = generator.easy_synthesize(batch.to(DEVICE), **KWARGS)['image']
-            # all_ims.append(ims if few else ims.detach().cpu())
-            all_ims.append(torch.randn_like(ims).detach().cpu())
+            if return_ims:
+                all_ims.append(ims if few else ims.detach().cpu())
             # Transform, forward and store
             ims = transform(ims)
             ims = ims.unsqueeze(0) if ims.ndim == 3 else ims
