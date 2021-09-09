@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --partition=batch
-#SBATCH --array=[0-9]
+#SBATCH --array=[0-24]
 #SBATCH -J adam_xent
 #SBATCH -o logs/adam_xent.%J.out
 #SBATCH -e logs/adam_xent.%J.err
@@ -15,7 +15,7 @@
 source venv/bin/activate
 
 python main_attack.py \
---chunks 10 \
+--chunks 25 \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --output-dir debug_adam_lr1e-0 \
 --lr 1e-0 \
