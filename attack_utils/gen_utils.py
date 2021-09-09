@@ -103,6 +103,7 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False):
     all_ims, all_embs = [], []
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
+    print('Before the for-loop')
     for batch in itr:
         with torch.set_grad_enabled(few):
             # Forward and store
