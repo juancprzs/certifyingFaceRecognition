@@ -382,7 +382,6 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         )
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
-        import pdb; pdb.set_trace()
         plot_advs(orig_ims, adv_ims, conf_ims, args)
     
     # Log the results
@@ -392,22 +391,23 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
     return log_file
 
     
-def plot_advs(orig, adv_ims, confu, args):
+def plot_advs(orig_ims, orig_labels, adv_ims, adv_labels, confu, args):
     # Show in a plot
     args.LOGGER.info(f'Plotting adversaries')
-    for idx, (ori, adv, conf) in enumerate(zip(orig, adv_ims, confu)):
+    for ori_im, ori_lab, adv_im, adv_lab, conf in zip(orig_ims, orig_labels, 
+            adv_ims, adv_labels, confu):
         plt.figure()
-        plt.subplot(131); plt.imshow(ori.cpu().permute(1, 2, 0).numpy())
+        plt.subplot(131); plt.imshow(ori_im.cpu().permute(1, 2, 0).numpy())
         plt.axis('off'); plt.title('Original')
 
-        plt.subplot(132); plt.imshow(adv.cpu().permute(1, 2, 0).numpy())
+        plt.subplot(132); plt.imshow(adv_im.cpu().permute(1, 2, 0).numpy())
         plt.axis('off'); plt.title('Adversary')
 
         plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
         plt.axis('off'); plt.title('Prediction')
 
         plt.tight_layout()
-        path = osp.join(args.figs_dir, f'id_{idx}.png')
+        path = osp.join(args.figs_dir, f'ori_{ori_lab}_adv_{adv_lab}.png')
         plt.savefig(path, bbox_inches='tight', dpi=400)
         plt.close()
     
