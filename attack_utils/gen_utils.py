@@ -6,8 +6,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from torch.optim import SGD, Adam
 from torchvision.transforms import Compose, Normalize
-from .proj_utils import (get_projection_matrices, sample_ellipsoid,
-    project_to_region_pytorch, set_seed, in_subs, in_ellps)
+from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
+    proj2region, in_subs, in_ellps)
 
 # Script argument-dependent constants
 INP_RESOLS = { 'insightface' : 112, 'facenet' : 160 }
@@ -28,13 +28,29 @@ ORIG_IMAGES_PATH = osp.join(ORIG_DATA_PATH, 'ims')
 ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
 LAT_CODES_PATH = osp.join(ORIG_DATA_PATH, f'{LAT_SPACE}.npy')
 
-PROJ_MAT, ELLIPSE_MAT, DIRS, _ = get_projection_matrices(dataset=DATASET, 
-    gan_name=GAN_NAME)
+# Several matrices:
+# (1) The projection-to-subspace matrix
+# (2) The matrix describing the hyperellipsoid
+# (3) The matrix of directions of our interest
+# (4) The matrix describing the lower-dimensional hyperellipsoid
+# (5) The matrix of reduced directions of our interest (low dims -> square mat!)
+PROJ_MAT, ELLIPSE_MAT, DIRS, RED_ELLIPSE_MAT, RED_DIRS, _ = \
+    get_projection_matrices(dataset=DATASET, gan_name=GAN_NAME)
+
 DIRS = torch.tensor(DIRS, dtype=torch.float32, device=DEVICE)
 PROJ_MAT = torch.tensor(PROJ_MAT, dtype=torch.float32, device=DEVICE)
 ELLIPSE_MAT = torch.tensor(ELLIPSE_MAT, dtype=torch.float32, device=DEVICE) 
-assert PROJ_MAT.shape[0] == PROJ_MAT.shape[1] == EMB_SIZE
-assert ELLIPSE_MAT.shape[0] == ELLIPSE_MAT.shape[1] == EMB_SIZE
+assert PROJ_MAT.size(0) == PROJ_MAT.size(1) == EMB_SIZE
+assert ELLIPSE_MAT.size(0) == ELLIPSE_MAT.size(1) == EMB_SIZE
+
+RED_DIRS = torch.tensor(RED_DIRS, dtype=torch.float32, device=DEVICE)
+RED_ELLIPSE_MAT = torch.tensor(RED_ELLIPSE_MAT, dtype=torch.float32, 
+    device=DEVICE)
+assert RED_ELLIPSE_MAT.size(0) == RED_ELLIPSE_MAT.size(1) == DIRS.size(1)
+    
+N_DIRS = DIRS.size(1)
+DIRS_INV = torch.linalg.pinv(DIRS)
+RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 
 def get_latent_codes(generator):
@@ -105,7 +121,6 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
     all_ims = [] if return_ims else None
     itr = generator.get_batch_inputs(lat_codes)
     if with_tqdm: itr = tqdm(itr)
-    tot_codes = 0
     for batch in itr:
         with torch.set_grad_enabled(few):
             # Forward and store
@@ -118,8 +133,6 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
             embs = net(ims)
             all_embs.append(embs if few else embs.detach().cpu())
         
-        tot_codes += batch.size(0)
-        # print(f'A total of {tot_codes} codes processed until now')
 
     if return_ims: all_ims = torch.cat(all_ims)
         
@@ -181,25 +194,39 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return -1. * xent.mean()
 
 
-def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, 
-        lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
-        rand_init_on_surf=True):
-    # Initialize deltas
+def init_deltas(random_init, lin_comb, n_vecs, on_surface):
     if random_init:
         # Sample from ellipsoid and project
-        deltas = sample_ellipsoid(ELLIPSE_MAT, n_vecs=lat_codes.size(0))
-        deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, 
-            ELLIPSE_MAT, check=True, dirs=DIRS, on_surface=rand_init_on_surf)
-        # Transform to tensor
-        deltas = deltas.clone().detach().requires_grad_(True)
+        deltas = sample_ellipsoid(ELLIPSE_MAT, n_vecs=n_vecs)
+        deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT, check=True, 
+            dirs=DIRS, on_surface=on_surface)
+        deltas = deltas.clone().detach()
+        if lin_comb: # Express the computed delta as a lin comb of our dirs
+            # The current deltas is of shape [batch_size, lat_space]
+            deltas = (DIRS_INV @ deltas.T).T
+            deltas = deltas.clone().detach()
     else:
-        deltas = torch.zeros_like(lat_codes, requires_grad=True)
-    
+        if lin_comb:
+            deltas = torch.zeros(n_vecs, N_DIRS, device=DEVICE)
+        else:
+            deltas = torch.zeros(n_vecs, EMB_SIZE)
+
+    return deltas.requires_grad_(True)
+
+
+def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, 
+        lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
+        rand_init_on_surf=True, lin_comb=True):
+    # Initialize deltas
+    deltas = init_deltas(random_init, lin_comb, n_vecs=lat_codes.size(0), 
+        on_surface=rand_init_on_surf)
     # Their corresponding optimizer
     optim = get_optim(deltas, optim_name=optim_name, lr=lr, momentum=momentum)
     for idx_iter in range(iters):
+        # Perturb latent codes
+        perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
         # Get embeddings from perturbed latent codes
-        embs, _ = lat2embs(generator, net, lat_codes + deltas, transform, 
+        embs, _ = lat2embs(generator, net, lat_codes+perturbation, transform, 
             few=True)
         # Compute current predictions and check for attack success
         all_dists = get_dists(embs, orig_embs, method=frs_method)
@@ -216,13 +243,26 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name,
         optim.step()
         # Projection
         with torch.no_grad():
-            deltas, _ = project_to_region_pytorch(deltas, PROJ_MAT, ELLIPSE_MAT, 
-                check=True, dirs=DIRS, on_surface=False)
+            if lin_comb: # Project to low-dimensional ellipsoid
+                # Compute where current deltas fall in our reduced space
+                pert = (RED_DIRS @ deltas.T).T
+                # Project this point to inside the ellipse in this space
+                proj, _ = proj2region(pert, PROJ_MAT, RED_ELLIPSE_MAT, 
+                    to_subs=False, check=True, dirs=DIRS, on_surface=False)
+                # Find the coefficients that produce this projection
+                deltas = (RED_DIRS_INV @ proj.T).T
+            else: # Project to high-dimensional ellipsoid
+                deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT,
+                    check=True, dirs=DIRS, on_surface=False)
             # Re-establish old values for deltas that were already succesful
             deltas[success] = old_deltas[success]
 
     # Final check of deltas
-    assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
+    if lin_comb:
+        pert = (RED_DIRS @ deltas.T).T
+        assert in_ellps(pert.T, RED_ELLIPSE_MAT)
+    else:
+        assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
 
     return deltas.detach().cpu(), success
 
@@ -345,7 +385,7 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
             optim_name=args.optim, lr=args.lr, iters=args.iters, 
             momentum=args.momentum, frs_method=args.face_recog_method, 
             loss_type=args.loss, transform=transform, random_init=True, 
-            rand_init_on_surf=not args.not_on_surf
+            rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb
         )
         n_succ += succ.sum()
         tot += batch_size
@@ -365,8 +405,11 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         # Get the output on the images for which deltas were found
         succ_lat_codes = lat_cods_chunk[successes]
         succ_deltas = deltas[successes]
+        if args.lin_comb:
+            succ_deltas = (DIRS.to(deltas.device) @ succ_deltas.T).T
+        
         adv_embs, adv_ims, curr_preds, _, orig_ims = get_curr_preds(
-            generator, net, embs, succ_lat_codes, 
+            generator, net, embs, succ_lat_codes,
             succ_deltas, transform, device, args
         )
         # Check they are indeed adversarial

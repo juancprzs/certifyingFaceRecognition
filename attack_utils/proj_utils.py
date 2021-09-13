@@ -7,6 +7,7 @@ from glob import glob
 import os.path as osp
 from collections import OrderedDict
 from scipy.optimize import root_scalar
+from scipy.spatial.distance import pdist
 
 DEMO = False
 BOUNDARIES_DIR = 'boundaries'
@@ -406,9 +407,9 @@ def project_to_region(vs, proj_mat, ellipse_mat, check=True, dirs=None,
 
 
 def in_subs(v, proj_mat):
-        dists2subs = torch.norm(proj_mat @ v - v, p=2, dim=0)
-        whch_out = dists2subs > 0.
-        return torch.allclose(dists2subs[whch_out], torch.tensor(0.), atol=1e-4)
+    dists2subs = torch.norm(proj_mat @ v - v, p=2, dim=0)
+    whch_out = dists2subs > 0.
+    return torch.allclose(dists2subs[whch_out], torch.tensor(0.), atol=1e-4)
 
 
 def in_ellps(v, ellipse_mat):
@@ -417,7 +418,7 @@ def in_ellps(v, ellipse_mat):
     return torch.allclose(dists[whch_out], torch.tensor(1.), atol=1e-4)
 
 
-def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None, 
+def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
         on_surface=False, max_iters=5):
     '''
     vs: vectors to project (d x n1)
@@ -431,10 +432,16 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
         dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
         sqrt_dists = torch.sqrt(dists.reshape(1, -1))
         return v / (sqrt_dists + 1e-5)
+
+    def condition(proj):
+        if to_subs:
+            return in_subs(proj, proj_mat) and in_ellps(proj, ellipse_mat)
+        else:
+            return in_ellps(proj, ellipse_mat)
     
     vs = vs.T
-    # Project to subspace (as spanned by dirs)
-    proj_subs = proj_mat @ vs # Project vector to subspace
+    # Project vector to subspace (as spanned by dirs)
+    proj_subs = proj_mat @ vs if to_subs else vs
 
     # Projection ON the ellipse (if requested)
     if on_surface: proj_subs = proj2surf(proj_subs)
@@ -444,15 +451,16 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
 
     # Iterate until max_iters if needed
     curr_iters = 0
-    while not (in_subs(proj_ell, proj_mat) and in_ellps(proj_ell, ellipse_mat)):
+    while not condition(proj_ell):
         if curr_iters == max_iters: break
         curr_iters += 1
         # The projection of query vector onto the ellipse
         proj_ell, _, _ = proj_ellipse_pytorch(proj_ell, ellipse_mat)
-        proj_ell = proj_mat @ proj_ell # Project vector to subspace
+        # Project vector to subspace
+        proj_ell = proj_mat @ proj_ell if to_subs else proj_ell
     
     # Final projection for vectors that are still a bit outside
-    if not (in_subs(proj_ell, proj_mat) and in_ellps(proj_ell, ellipse_mat)):
+    if not condition(proj_ell):
         # Compute which ones are outside
         dists = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
         whr_need = (torch.sqrt(dists.reshape(1, -1)) >= 1).squeeze()
@@ -461,11 +469,12 @@ def project_to_region_pytorch(vs, proj_mat, ellipse_mat, check=True, dirs=None,
     if check:
         assert dirs is not None, \
             "Must provide 'dirs' if want to check projection"
-        # Check for subspace
-        assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
-            'Projection matrix to subspace is wrong'
-        assert in_subs(proj_ell, proj_mat), 'Points inside ellipse should ' \
-            'also be on the subspace'
+        if to_subs:
+            # Check for subspace
+            assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
+                'Projection matrix to subspace is wrong'
+            assert in_subs(proj_ell, proj_mat), 'Points inside ellipse should '\
+                'also be on the subspace'
         # Check for ellipse
         assert in_ellps(proj_ell, ellipse_mat), 'Some points outside ellipsoid!'
     
@@ -574,17 +583,57 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0]):
         plot_inner_prods(dirs)
 
     proj_mat = get_proj_mat(dirs) # proj_mat.shape == [n_dims, n_dims]
+    ellipse_mat = get_ellipse_mat(dirs)
+
+    # We also compute a lower-dimensional version of the ellipse matrix. This 
+    # matrix represents a hyper-ellipsoid that DOES NOT live in the original
+    # high-dimensional space, but on a space of dimension equivalent to the 
+    # number of the direction of interest
+    red_dirs = transform_vecs(dirs) # Reduced directions
+    red_ellipse_mat = get_ellipse_mat(red_dirs)
+
+    # Return:
+    # (1) proj to subspace, (2) mat parameterizing ellipse, (3) directions, 
+    # (4) mat parameterizing reduced ellipse, (4) reduced directions, and 
+    # (5) files from which the directions came
+    return proj_mat, ellipse_mat, dirs, red_ellipse_mat, red_dirs, files
+
+
+def get_ellipse_mat(dirs):
     dirs_expanded, _ = get_full_points(dirs, fill_with_null=True)
     ellipse_mat, c = mvee(dirs_expanded.T) # Their way
     assert np.allclose(c, 0), "The origin should be the ellipses's center"
     # dirs_expanded, exp_out = get_full_points(dirs, fill_with_null=True)
     # my_X = my_mvee(dirs_expanded, exp_out)
     # assert np.allclose(X, my_X)
+    return ellipse_mat
 
-    # Return:
-    # proj to subspace, mat parameterizing ellipse, directions, and 
-    # files from which the directions came
-    return proj_mat, ellipse_mat, dirs, files
+
+def transform_vecs(dirs):
+    '''
+    dirs is a matrix of shape [n_dims, n_vecs]
+    '''
+    norms = np.linalg.norm(dirs, axis=0)
+    dot_prods = dirs.T @ dirs
+    n_vecs = dirs.shape[1]
+    new_dirs = np.zeros((n_vecs, n_vecs))
+    new_dirs[0, 0] = norms[0]
+    for idx in range(1, n_vecs):
+        curr_dot_prods = dot_prods[idx, :idx]
+        curr_mat = new_dirs[:idx, :idx]
+        # Solve system to find first n=idx vector coords
+        partial_vec = np.linalg.solve(curr_mat.T, curr_dot_prods)
+        new_dirs[:idx, idx] = partial_vec 
+        # Last coord is determined by norm
+        inner_prod = partial_vec.T @ partial_vec
+        last_coord = norms[idx]**2 - inner_prod
+        new_dirs[idx, idx] = np.sqrt(last_coord)
+
+    # Check dot products
+    assert np.allclose(dot_prods, new_dirs.T @ new_dirs, atol=5e-4)
+    # Check distances (Yes, I know this assertion is redundant)
+    assert np.allclose(pdist(dirs.T), pdist(new_dirs.T))
+    return new_dirs
 
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
