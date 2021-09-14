@@ -20,6 +20,8 @@ def parse_args():
                         help='Optimization iterations per instance')
     parser.add_argument('--lin-comb', action='store_true', default=False,
 		                help='Compute adv in terms of lin. comb. of directions')
+    parser.add_argument('--restarts', type=int, default=10, 
+                        help='num of chunks in which to break the dataset')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')

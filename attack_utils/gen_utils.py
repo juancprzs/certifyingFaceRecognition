@@ -120,8 +120,13 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
     all_embs = []
     all_ims = [] if return_ims else None
     # Pad input (if necessary)
-    to_pad = generator.batch_size - lat_codes.size(0) % generator.batch_size
-    pad_inp = torch.cat([lat_codes, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+    if generator.batch_size % lat_codes.size(0) == 0:
+        to_pad = 0
+    else:
+        to_pad = generator.batch_size - lat_codes.size(0) % generator.batch_size
+    
+    pad_inp = torch.cat([lat_codes, 
+        torch.zeros(to_pad, EMB_SIZE, device=lat_codes.device)], dim=0)
 
     itr = generator.get_batch_inputs(pad_inp)
     if with_tqdm: itr = tqdm(itr)
@@ -137,12 +142,11 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
             embs = net(ims)
             all_embs.append(embs if few else embs.detach().cpu())
         
-    # Extract (since we padded)
+    # Extract 'n_orig' samples (since we padded)
     n_orig = lat_codes.size(0)
-    all_embs = all_embs[:n_orig]
-    if return_ims: all_ims = torch.cat(all_ims[:n_orig])
+    if return_ims: all_ims = torch.cat(all_ims)[:n_orig]
         
-    return torch.cat(all_embs), all_ims
+    return torch.cat(all_embs)[:n_orig], all_ims
 
 
 def get_curr_preds(generator, net, embs, curr_lats, deltas, transform, device, 
@@ -238,48 +242,55 @@ def init_deltas(random_init, lin_comb, n_vecs, on_surface):
     return deltas.requires_grad_(True)
 
 
-def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name, 
+def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name, 
         lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
-        rand_init_on_surf=True, lin_comb=True):
-    # Initialize deltas
-    deltas = init_deltas(random_init, lin_comb, n_vecs=lat_codes.size(0), 
-        on_surface=rand_init_on_surf)
-    # Their corresponding optimizer
-    optim = get_optim(deltas, optim_name=optim_name, lr=lr, momentum=momentum)
-    for idx_iter in range(iters):
-        # Perturb latent codes
-        perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
-        # Get embeddings from perturbed latent codes
-        embs, _ = lat2embs(generator, net, lat_codes+perturbation, transform, 
-            few=True)
-        # Compute current predictions and check for attack success
-        all_dists = get_dists(embs, orig_embs, method=frs_method)
-        preds = torch.argmin(all_dists, 1)
-        success = preds != labels
-        if torch.all(success): break
-        # Compute loss
-        loss = compute_loss(all_dists, labels, loss_type=loss_type)
-        # Backward
-        optim.zero_grad()
-        loss.backward()
-        # Optim step without forgetting previous values
-        old_deltas = torch.clone(deltas).detach()
-        optim.step()
-        # Projection
-        with torch.no_grad():
-            if lin_comb: # Project to low-dimensional ellipsoid
-                # Compute where current deltas fall in our reduced space
-                pert = (RED_DIRS @ deltas.T).T
-                # Project this point to inside the ellipse in this space
-                proj, _ = proj2region(pert, PROJ_MAT, RED_ELLIPSE_MAT, 
-                    to_subs=False, check=True, dirs=DIRS, on_surface=False)
-                # Find the coefficients that produce this projection
-                deltas = (RED_DIRS_INV @ proj.T).T
-            else: # Project to high-dimensional ellipsoid
-                deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT,
-                    check=True, dirs=DIRS, on_surface=False)
-            # Re-establish old values for deltas that were already succesful
-            deltas[success] = old_deltas[success]
+        rand_init_on_surf=True, lin_comb=True, restarts=5):
+    # First deltas as garbage
+    deltas = float('nan') * init_deltas(random_init, lin_comb, 
+        n_vecs=lat_codes.size(0), on_surface=False)
+    success = torch.zeros_like(labels, dtype=bool) # Not successful anywhere
+    for idx_rest in range(restarts):
+        # (Re-)Initialize deltas that haven't been successful
+        inits = init_deltas(random_init, lin_comb, n_vecs=lat_codes.size(0), 
+            on_surface=rand_init_on_surf).clone().detach()
+        deltas[~success] = inits[~success]
+        # Their corresponding optimizer
+        optim = get_optim(deltas.clone().detach(), optim_name=opt_name, lr=lr, 
+            momentum=momentum)
+        for idx_iter in range(iters):
+            # Perturb latent codes
+            perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
+            # Get embeddings from perturbed latent codes
+            embs, _ = lat2embs(generator, net, lat_codes+perturbation, transform, 
+                few=True)
+            # Compute current predictions and check for attack success
+            all_dists = get_dists(embs, orig_embs, method=frs_method)
+            preds = torch.argmin(all_dists, 1)
+            success = preds != labels
+            if torch.all(success): break
+            # Compute loss
+            loss = compute_loss(all_dists, labels, loss_type=loss_type)
+            # Backward
+            optim.zero_grad()
+            loss.backward()
+            # Optim step without forgetting previous values
+            old_deltas = torch.clone(deltas).detach()
+            optim.step()
+            # Projection
+            with torch.no_grad():
+                if lin_comb: # Project to low-dimensional ellipsoid
+                    # Compute where current deltas fall in our reduced space
+                    pert = (RED_DIRS @ deltas.T).T
+                    # Project this point to inside the ellipse in this space
+                    proj, _ = proj2region(pert, PROJ_MAT, RED_ELLIPSE_MAT, 
+                        to_subs=False, check=True, dirs=DIRS, on_surface=False)
+                    # Find the coefficients that produce this projection
+                    deltas = (RED_DIRS_INV @ proj.T).T
+                else: # Project to high-dimensional ellipsoid
+                    deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT,
+                        check=True, dirs=DIRS, on_surface=False)
+                # Re-establish old values for deltas that were already succesful
+                deltas[success] = old_deltas[success]
 
     # Final check of deltas
     if lin_comb:
@@ -377,10 +388,11 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         # The actual computation of the adversaries
         curr_deltas, succ = find_adversaries(
             generator, net, btch_cods.to(device), labels, embs, 
-            optim_name=args.optim, lr=args.lr, iters=args.iters, 
+            opt_name=args.optim, lr=args.lr, iters=args.iters, 
             momentum=args.momentum, frs_method=args.face_recog_method, 
             loss_type=args.loss, transform=transform, random_init=True, 
-            rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb
+            rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb,
+            restarts=args.restarts
         )
         n_succ += succ.sum()
         tot += batch_size
@@ -402,7 +414,7 @@ def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk,
         succ_deltas = deltas[successes]
         if args.lin_comb:
             succ_deltas = (DIRS.to(deltas.device) @ succ_deltas.T).T
-        
+
         adv_embs, adv_ims, curr_preds, _, orig_ims = get_curr_preds(
             generator, net, embs, succ_lat_codes,
             succ_deltas, transform, device, args

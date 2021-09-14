@@ -412,10 +412,10 @@ def in_subs(v, proj_mat):
     return torch.allclose(dists2subs[whch_out], torch.tensor(0.), atol=1e-4)
 
 
-def in_ellps(v, ellipse_mat):
+def in_ellps(v, ellipse_mat, atol=1e-4):
     dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
     whch_out = dists > 1.
-    return torch.allclose(dists[whch_out], torch.tensor(1.), atol=1e-4)
+    return torch.allclose(dists[whch_out], torch.tensor(1.), atol=atol)
 
 
 def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
@@ -461,7 +461,6 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
     
     # Final projection for vectors that are still a bit outside
     if not condition(proj_ell):
-        # Compute which ones are outside
         dists = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
         whr_need = (torch.sqrt(dists.reshape(1, -1)) >= 1).squeeze()
         proj_ell[:, whr_need] = proj2surf(proj_ell)[:, whr_need]
