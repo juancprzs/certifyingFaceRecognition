@@ -119,7 +119,11 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
         return_ims=False):
     all_embs = []
     all_ims = [] if return_ims else None
-    itr = generator.get_batch_inputs(lat_codes)
+    # Pad input (if necessary)
+    to_pad = generator.batch_size - lat_codes.size(0) % generator.batch_size
+    pad_inp = torch.cat([lat_codes, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+
+    itr = generator.get_batch_inputs(pad_inp)
     if with_tqdm: itr = tqdm(itr)
     for batch in itr:
         with torch.set_grad_enabled(few):
@@ -133,10 +137,41 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
             embs = net(ims)
             all_embs.append(embs if few else embs.detach().cpu())
         
-
-    if return_ims: all_ims = torch.cat(all_ims)
+    # Extract (since we padded)
+    n_orig = lat_codes.size(0)
+    all_embs = all_embs[:n_orig]
+    if return_ims: all_ims = torch.cat(all_ims)[:n_orig]
         
     return torch.cat(all_embs), all_ims
+
+
+def get_curr_preds(generator, net, embs, curr_lats, deltas, transform, device, 
+        args):
+    n = curr_lats.size(0)
+    # Compute the ORIGINAL images
+    # Pad input (if necessary)
+    to_pad = generator.batch_size - curr_lats.size(0) % generator.batch_size
+    pad_inp = torch.cat([curr_lats, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+    orig_embs, orig_ims = lat2embs(generator, net, pad_inp, transform, 
+        with_tqdm=True, return_ims=True)
+    # Extract (since we padded)
+    orig_embs, orig_ims = orig_embs[:n], orig_ims[:n]
+
+    # Compute the ADVERSARIAL images according to the computed deltas
+    adv_lat_cds = curr_lats + deltas
+    # Pad input (if necessary)
+    to_pad = generator.batch_size - adv_lat_cds.size(0) % generator.batch_size
+    pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
+    adv_embs, adv_ims = lat2embs(generator, net, pad_inp, transform, 
+        with_tqdm=True, return_ims=True)
+    # Extract (since we padded)
+    adv_embs, adv_ims = adv_embs[:n], adv_ims[:n]
+
+    # Get the current predictions according to the distances
+    curr_dists = get_dists(adv_embs.to(device), embs, 
+        method=args.face_recog_method)
+    curr_preds = torch.argmin(curr_dists, 1)
+    return adv_embs, adv_ims, curr_preds, orig_embs, orig_ims
 
 
 def compute_loss(all_dists, labels, loss_type='away', use_probs=True, 
@@ -260,40 +295,11 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, optim_name,
     # Final check of deltas
     if lin_comb:
         pert = (RED_DIRS @ deltas.T).T
-        assert in_ellps(pert.T, RED_ELLIPSE_MAT)
+        assert in_ellps(pert.T, RED_ELLIPSE_MAT, atol=5e-4)
     else:
         assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
 
     return deltas.detach().cpu(), success
-
-
-def get_curr_preds(generator, net, embs, curr_lats, deltas, transform, device, 
-        args):
-    n = curr_lats.size(0)
-    # Compute the ORIGINAL images
-    # Pad input (if necessary)
-    to_pad = generator.batch_size - curr_lats.size(0) % generator.batch_size
-    pad_inp = torch.cat([curr_lats, torch.zeros(to_pad, EMB_SIZE)], dim=0)
-    orig_embs, orig_ims = lat2embs(generator, net, pad_inp, transform, 
-        with_tqdm=True, return_ims=True)
-    # Extract (since we padded)
-    orig_embs, orig_ims = orig_embs[:n], orig_ims[:n]
-
-    # Compute the ADVERSARIAL images according to the computed deltas
-    adv_lat_cds = curr_lats + deltas
-    # Pad input (if necessary)
-    to_pad = generator.batch_size - adv_lat_cds.size(0) % generator.batch_size
-    pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
-    adv_embs, adv_ims = lat2embs(generator, net, pad_inp, transform, 
-        with_tqdm=True, return_ims=True)
-    # Extract (since we padded)
-    adv_embs, adv_ims = adv_embs[:n], adv_ims[:n]
-
-    # Get the current predictions according to the distances
-    curr_dists = get_dists(adv_embs.to(device), embs, 
-        method=args.face_recog_method)
-    curr_preds = torch.argmin(curr_dists, 1)
-    return adv_embs, adv_ims, curr_preds, orig_embs, orig_ims
 
 
 def check_advs(labels, curr_preds, successes, args):
