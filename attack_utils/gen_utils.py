@@ -55,7 +55,7 @@ RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)
+    return torch.from_numpy(lat_codes)[:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -140,32 +140,21 @@ def lat2embs(generator, net, lat_codes, transform, few=False, with_tqdm=False,
     # Extract (since we padded)
     n_orig = lat_codes.size(0)
     all_embs = all_embs[:n_orig]
-    if return_ims: all_ims = torch.cat(all_ims)[:n_orig]
+    if return_ims: all_ims = torch.cat(all_ims[:n_orig])
         
     return torch.cat(all_embs), all_ims
 
 
 def get_curr_preds(generator, net, embs, curr_lats, deltas, transform, device, 
         args):
-    n = curr_lats.size(0)
     # Compute the ORIGINAL images
-    # Pad input (if necessary)
-    to_pad = generator.batch_size - curr_lats.size(0) % generator.batch_size
-    pad_inp = torch.cat([curr_lats, torch.zeros(to_pad, EMB_SIZE)], dim=0)
-    orig_embs, orig_ims = lat2embs(generator, net, pad_inp, transform, 
+    orig_embs, orig_ims = lat2embs(generator, net, curr_lats, transform, 
         with_tqdm=True, return_ims=True)
-    # Extract (since we padded)
-    orig_embs, orig_ims = orig_embs[:n], orig_ims[:n]
 
     # Compute the ADVERSARIAL images according to the computed deltas
     adv_lat_cds = curr_lats + deltas
-    # Pad input (if necessary)
-    to_pad = generator.batch_size - adv_lat_cds.size(0) % generator.batch_size
-    pad_inp = torch.cat([adv_lat_cds, torch.zeros(to_pad, EMB_SIZE)], dim=0)
-    adv_embs, adv_ims = lat2embs(generator, net, pad_inp, transform, 
+    adv_embs, adv_ims = lat2embs(generator, net, adv_lat_cds, transform, 
         with_tqdm=True, return_ims=True)
-    # Extract (since we padded)
-    adv_embs, adv_ims = adv_embs[:n], adv_ims[:n]
 
     # Get the current predictions according to the distances
     curr_dists = get_dists(adv_embs.to(device), embs, 
