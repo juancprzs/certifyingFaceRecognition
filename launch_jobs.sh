@@ -14,7 +14,7 @@
 
 source venv/bin/activate
 
-python main_attack.py \1
+python main_attack.py \
 --chunks 25 \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --optim SGD \
