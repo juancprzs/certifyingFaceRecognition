@@ -431,7 +431,7 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
     def proj2surf(v):
         dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
         sqrt_dists = torch.sqrt(dists.reshape(1, -1))
-        return v / (sqrt_dists + 1e-5)
+        return v / (sqrt_dists + 1e-4)
 
     def condition(proj):
         if to_subs:
@@ -464,7 +464,7 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
         # Compute which ones are outside
         dists = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
         whr_need = (torch.sqrt(dists.reshape(1, -1)) >= 1).squeeze()
-        proj_ell[:, whr_need] = proj2surf(proj_ell[:, whr_need])
+        proj_ell[:, whr_need] = proj2surf(proj_ell)[:, whr_need]
 
     if check:
         assert dirs is not None, \
