@@ -195,22 +195,31 @@ def main(args):
     # DNN
     net = get_net(method=args.face_recog_method)
     # Embeddings of original images
-    args.LOGGER.info('Generating original images and embeddings')
-    embs, ims = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
+    if args.load_embs:
+        assert args.embs_file is not None
+        args.LOGGER.info(f'Loading embs from file "{args.embs_file}"')
+        embs = torch.load(args.embs_file)
+    else:
+        args.LOGGER.info('Generating original embs')
+        embs, _ = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
+        if args.embs_file is not None:
+            args.LOGGER.info(f'Saving original embs to file "{args.embs_file}"')
+            torch.save(embs, args.embs_file)
+    
     embs = embs.to(DEVICE)
     # Evaluate either all chunks or a single one
     if args.num_chunk is None: # evaluate sequentially
         log_files = []
         for num_chunk in range(args.chunks):
             set_seed(DEVICE, seed=args.seed + num_chunk)
-            log_file = eval_chunk(GENERATOR, net, LAT_CODES, ims, embs, 
-                transform, num_chunk, DEVICE, args)
+            log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
+                num_chunk, DEVICE, args)
             log_files.append(log_file)
 
         eval_files(log_files, args)
     else: # evaluate a single chunk and exit
         set_seed(DEVICE, seed=args.seed + args.num_chunk)
-        log_file = eval_chunk(GENERATOR, net, LAT_CODES, ims, embs, transform, 
+        log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
             args.num_chunk, DEVICE, args)
 
     tot_time = time() - start

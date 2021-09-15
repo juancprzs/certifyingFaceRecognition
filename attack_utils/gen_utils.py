@@ -55,7 +55,7 @@ RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)[:80]
+    return torch.from_numpy(lat_codes)
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -361,8 +361,8 @@ def eval_files(log_files, args):
     args.LOGGER.info(f'Saved all results to {args.final_results}')
 
 
-def eval_chunk(generator, net, lat_codes, ims, embs, transform, num_chunk, 
-        device, args):
+def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
+        args):
     args.LOGGER.info(f'Processing chunk {num_chunk} out of {args.chunks}')
     chunk_length = len(lat_codes) / args.chunks
     # Ensure chunk length is valid

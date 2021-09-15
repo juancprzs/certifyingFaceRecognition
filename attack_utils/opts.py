@@ -20,7 +20,7 @@ def parse_args():
                         help='Optimization iterations per instance')
     parser.add_argument('--lin-comb', action='store_true', default=False,
 		                help='Compute adv in terms of lin. comb. of directions')
-    parser.add_argument('--restarts', type=int, default=10, 
+    parser.add_argument('--restarts', type=int, default=5, 
                         help='num of chunks in which to break the dataset')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
@@ -40,6 +40,10 @@ def parse_args():
     parser.add_argument('--eval-files', action='store_true', default=False,
 		                help='evaluate based on files at '
                              'exp_results/logs/results_chunk*of*_*to*.txt')
+    parser.add_argument('--load-embs', action='store_true', default=False,
+                        help='Whether to load embs from file')
+    parser.add_argument('--embs-file', type=str, default=None,
+                        help='Load embs from this file')
     # Randomization
     parser.add_argument('--seed', type=int, default=0, 
                         help='for deterministic behavior')
