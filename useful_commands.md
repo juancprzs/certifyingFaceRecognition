@@ -1,9 +1,13 @@
 # Connect
 ssh -A -t kw60661.kaust.edu.sa # I dont know why this one shows an error with /tmp/pip-*
-ssh -A -t kw60623.kaust.edu.sa # Working. Currently running 1e-3 and 1e-2
-ssh -A -t kw60624.kaust.edu.sa # Working. Currently running 1e-1 and 1e-0
+ssh -A -t kw60828.kaust.edu.sa # For EGO4d (no slurm)
 ssh -A -t kw60746.kaust.edu.sa # Doesnt recognize password
-ssh -A -t kw60828.kaust.edu.sa
+
+ssh -A -t kw60624.kaust.edu.sa # Working. Currently running 1e-1 and 1e-0
+ssh -A -t kw60623.kaust.edu.sa # Slurm not working
+ssh -A -t kw60749.kaust.edu.sa # Slurm not working
+
+
 
 # Anaconda if it doesnt exist
 wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
@@ -26,14 +30,14 @@ mkdir -p data/stylegan_ffhq_recog_png/
 mkdir logs
 
 # FRS model weights
-scp -r /home/perezjc/Documents/cert_real_face_perts/weights/ kw60624.kaust.edu.sa:/home/perezjc/cert_real_face_perts
+scp -r /home/perezjc/Documents/cert_real_face_perts/weights/ kw60749.kaust.edu.sa:/home/perezjc/cert_real_face_perts
 
 # The environment
-scp -r /home/perezjc/Documents/cert_real_face_perts/venv kw60624.kaust.edu.sa:/home/perezjc/cert_real_face_perts
+scp -r /home/perezjc/Documents/cert_real_face_perts/venv kw60749.kaust.edu.sa:/home/perezjc/cert_real_face_perts
 
 # The w codes
-scp -r /home/perezjc/Documents/cert_real_face_perts/data/stylegan_ffhq_recog_png/w.npy kw60624.kaust.edu.sa:/home/perezjc/cert_real_face_perts/data/stylegan_ffhq_recog_png
+scp -r /home/perezjc/Documents/cert_real_face_perts/data/stylegan_ffhq_recog_png/w.npy kw60749.kaust.edu.sa:/home/perezjc/cert_real_face_perts/data/stylegan_ffhq_recog_png
 
 # GAN weights
-scp -r /home/perezjc/Documents/cert_real_face_perts/models/pretrain/ kw60624.kaust.edu.sa:/home/perezjc/cert_real_face_perts/models
+scp -r /home/perezjc/Documents/cert_real_face_perts/models/pretrain/ kw60749.kaust.edu.sa:/home/perezjc/cert_real_face_perts/models
 
