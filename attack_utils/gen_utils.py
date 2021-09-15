@@ -4,6 +4,7 @@ from tqdm import tqdm
 import os.path as osp
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from autoattack import AutoAttack
 from torch.optim import SGD, Adam
 from torchvision.transforms import Compose, Normalize
 from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
@@ -55,7 +56,7 @@ RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)
+    return torch.from_numpy(lat_codes)[:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -242,9 +243,37 @@ def init_deltas(random_init, lin_comb, n_vecs, on_surface):
     return deltas.requires_grad_(True)
 
 
+def get_dists_and_logits(generator, net, codes, transform, orig_embs, 
+        frs_method):
+    # Make forward pass
+    embs, _ = lat2embs(generator, net, codes, transform, few=True)
+    # Compute distances
+    all_dists = get_dists(embs, orig_embs, method=frs_method)
+    # Logits as negative of distances
+    logits = -1. * all_dists
+    return all_dists, logits
+
+
+def run_autoattack(generator, net, lat_codes, labels, orig_embs, frs_method, 
+        transform):
+    forward_pass = lambda x: get_dists_and_logits(generator, net, 
+        x.squeeze(3).squeeze(2), transform, orig_embs, frs_method)[1]
+    norm = 'L2' # Or 'Linf'?
+    adversary = AutoAttack(forward_pass, norm=norm, eps=0.031)
+    adversary.attacks_to_run = ['fab', 'fab-t']
+    adversary.fab.n_restarts = 5
+    adversary.fab.n_target_classes = 9
+    # Simulate image
+    lat_codes = lat_codes.unsqueeze(2).unsqueeze(3)
+    x_adv = adversary.run_standard_evaluation(lat_codes, labels, 
+        bs=generator.batch_size)
+
+
 def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name, 
         lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
         rand_init_on_surf=True, lin_comb=True, restarts=5):
+    # run_autoattack(generator, net, lat_codes, labels, orig_embs, frs_method, 
+    #     transform)
     # First deltas as garbage
     deltas = float('nan') * init_deltas(random_init, lin_comb, 
         n_vecs=lat_codes.size(0), on_surface=False)
@@ -260,11 +289,9 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name,
         for idx_iter in range(iters):
             # Perturb latent codes
             perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
-            # Get embeddings from perturbed latent codes
-            embs, _ = lat2embs(generator, net, lat_codes+perturbation, 
-                transform, few=True)
             # Compute current predictions and check for attack success
-            all_dists = get_dists(embs, orig_embs, method=frs_method)
+            all_dists, _ = get_dists_and_logits(generator, net, 
+                lat_codes+perturbation, transform, orig_embs, frs_method)
             preds = torch.argmin(all_dists, 1)
             success = preds != labels
             if torch.all(success): break
