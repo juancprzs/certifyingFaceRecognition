@@ -56,7 +56,7 @@ RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)[:80]
+    return torch.from_numpy(lat_codes)
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -278,46 +278,47 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name,
     deltas = float('nan') * init_deltas(random_init, lin_comb, 
         n_vecs=lat_codes.size(0), on_surface=False)
     success = torch.zeros_like(labels, dtype=bool) # Not successful anywhere
-    for idx_rest in range(restarts):
-        # (Re-)Initialize deltas that haven't been successful
-        inits = init_deltas(random_init, lin_comb, n_vecs=lat_codes.size(0), 
-            on_surface=rand_init_on_surf).clone().detach()
-        deltas[~success] = inits[~success]
-        # Their corresponding optimizer
-        optim = get_optim(deltas.clone().detach(), optim_name=opt_name, lr=lr, 
-            momentum=momentum)
-        for idx_iter in range(iters):
-            # Perturb latent codes
-            perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
-            # Compute current predictions and check for attack success
-            all_dists, _ = get_dists_and_logits(generator, net, 
-                lat_codes+perturbation, transform, orig_embs, frs_method)
-            preds = torch.argmin(all_dists, 1)
-            success = preds != labels
-            if torch.all(success): break
-            # Compute loss
-            loss = compute_loss(all_dists, labels, loss_type=loss_type)
-            # Backward
-            optim.zero_grad()
-            loss.backward()
-            # Optim step without forgetting previous values
-            old_deltas = torch.clone(deltas).detach()
-            optim.step()
-            # Projection
-            with torch.no_grad():
-                if lin_comb: # Project to low-dimensional ellipsoid
-                    # Compute where current deltas fall in our reduced space
-                    pert = (RED_DIRS @ deltas.T).T
-                    # Project this point to inside the ellipse in this space
-                    proj, _ = proj2region(pert, PROJ_MAT, RED_ELLIPSE_MAT, 
-                        to_subs=False, check=True, dirs=DIRS, on_surface=False)
-                    # Find the coefficients that produce this projection
-                    deltas = (RED_DIRS_INV @ proj.T).T
-                else: # Project to high-dimensional ellipsoid
-                    deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT,
-                        check=True, dirs=DIRS, on_surface=False)
-                # Re-establish old values for deltas that were already succesful
-                deltas[success] = old_deltas[success]
+    # for idx_rest in range(restarts):
+    # (Re-)Initialize deltas that haven't been successful
+    inits = init_deltas(random_init, lin_comb, n_vecs=lat_codes.size(0), 
+        on_surface=rand_init_on_surf).clone().detach()
+    deltas[~success] = inits[~success]
+    deltas = deltas.clone().detach().requires_grad_(True)
+    # Their corresponding optimizer
+    optim = get_optim(deltas, optim_name=opt_name, lr=lr, momentum=momentum)
+    for idx_iter in range(iters):
+        # Perturb latent codes
+        perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
+        # Compute current predictions and check for attack success
+        all_dists, _ = get_dists_and_logits(generator, net, 
+            lat_codes+perturbation, transform, orig_embs, frs_method)
+        preds = torch.argmin(all_dists, 1)
+        success = preds != labels
+        if torch.all(success): break
+        # Compute loss
+        loss = compute_loss(all_dists, labels, loss_type=loss_type)
+        # Backward
+        optim.zero_grad()
+        loss.backward()
+        # Optim step without forgetting previous values
+        old_deltas = torch.clone(deltas).detach()
+        optim.step()
+        # Projection
+        with torch.no_grad():
+            if lin_comb: # Project to low-dimensional ellipsoid
+                # Compute where current deltas fall in our reduced space
+                pert = (RED_DIRS @ deltas.T).T
+                # Project this point to inside the ellipse in this space
+                proj, _ = proj2region(pert, PROJ_MAT, RED_ELLIPSE_MAT, 
+                    to_subs=False, check=True, dirs=DIRS, on_surface=False)
+                # Find the coefficients that produce this projection
+                deltas = (RED_DIRS_INV @ proj.T).T
+            else: # Project to high-dimensional ellipsoid
+                deltas, _ = proj2region(deltas, PROJ_MAT, ELLIPSE_MAT,
+                    check=True, dirs=DIRS, on_surface=False)
+            # Re-establish old values for deltas that were already succesful
+            deltas[success] = old_deltas[success]
+            deltas = deltas.clone().detach().requires_grad_(True)
 
     # Final check of deltas
     if lin_comb:
