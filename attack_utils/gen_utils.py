@@ -261,8 +261,8 @@ def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name,
             # Perturb latent codes
             perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
             # Get embeddings from perturbed latent codes
-            embs, _ = lat2embs(generator, net, lat_codes+perturbation, transform, 
-                few=True)
+            embs, _ = lat2embs(generator, net, lat_codes+perturbation, 
+                transform, few=True)
             # Compute current predictions and check for attack success
             all_dists = get_dists(embs, orig_embs, method=frs_method)
             preds = torch.argmin(all_dists, 1)

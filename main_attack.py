@@ -199,7 +199,7 @@ def main(args):
         assert args.embs_file is not None
         args.LOGGER.info(f'Loading embs from file "{args.embs_file}"')
         embs = torch.load(args.embs_file)
-        args.LOGGER.info(f'Loaded {embs.size(0)} embs"')
+        args.LOGGER.info(f'Loaded {embs.size(0)} embs')
     else:
         args.LOGGER.info('Generating original embs')
         embs, _ = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
