@@ -21,4 +21,5 @@ python main_attack.py \
 --momentum 0.99 \
 --output-dir sgd_xent_lr1e+2_m99 \
 --lr 1e+2 \
---loss xent
+--loss xent \
+--restarts 1
