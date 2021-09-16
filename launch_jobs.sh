@@ -17,9 +17,11 @@ source venv/bin/activate
 python main_attack.py \
 --chunks 25 \
 --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--restarts 1 \
+--load-embs \
+--embs-file embs.pth \
 --optim SGD \
 --momentum 0.99 \
 --output-dir sgd_xent_lr1e+2_m99 \
 --lr 1e+2 \
---loss xent \
---restarts 1
+--loss xent
