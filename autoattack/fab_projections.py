@@ -3,7 +3,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-from scipy.linalg import null_space # Our modification
+from attack_utils.proj_utils import sq_distance # Our modification
 
 
 def projection_linf(points_to_project, w_hyperplane, b_hyperplane):
@@ -119,98 +119,29 @@ def projection_l2(points_to_project, w_hyperplane, b_hyperplane):
     return d * (w.abs() > 1e-8).float()
 
 
-def null_space_pytorch(At, rcond=None): # Our modification
-    # Taken from
-    # https://discuss.pytorch.org/t/nullspace-of-a-tensor/69980/4
-    # and then modified slightly
-    # ut, st, vht = torch.Tensor.svd(At, some=False, compute_uv=True)
-    # Add batch dim if doesn't exist
-    if len(At.shape) != 3:
-        At = At.unsqueeze(0)
-    
-    ut, st, vht = torch.svd(At, some=False, compute_uv=True)
-    vht = vht.permute(0, 2, 1) # vht.T        
-    Mt, Nt = ut.shape[1], vht.shape[2] # ut.shape[0], vht.shape[1]
-    if rcond is None:
-        rcondt = torch.finfo(st.dtype).eps * max(Mt, Nt)
-    
-    tolt = (torch.max(st, dim=1)[0]*rcondt).unsqueeze(1) # torch.max(st)*rcondt
-    numt = torch.sum(st > tolt, dtype=int, dim=1)
-    # nullspace = vht[numt:,:].T.cpu().conj()
-    nullspace = [vht[idx, x:, :].T.conj() for idx, x in enumerate(numt)]
-
-    return nullspace
-
-
 def projection_lsigma2(points_to_project, w_hyperplane, b_hyperplane, 
-        ellipse_mat):
+        ellipse_mat_inv):
     '''
     We must project points to a plane, defined by `w` and `b`: w.T @ x + b, 
-        under the norm induced by a matrix ('sigma' here). To do this, we
-    (1): Express this plane, not as `w` and `b`, but as a minimal set of vectors
-        that (upon translation) span this plane. This corresponds to a 
-        'translated' version of the null space of `w`.
-    (2): Solving a simple optimization problem of minimizing the distance to the
-        plane w.r.t. the norm induced by the matrix. By equating the derivative
-        of the norm to zero, we arrive at yet another minimization problem that
-        we can solve through least squares.
-    
+        under the norm induced by a matrix ('sigma' here). This is solved with 
+        Lagrangian multipliers.
     This procedure DOES NOT consider box-constraints (referring to the usual 
     pixel requirements of [0,1]^d)
     '''
     device = points_to_project.device
     t, w, b = points_to_project, w_hyperplane.clone(), b_hyperplane
     # t.shape == w.shape == [2*bs, lat_dim], b.shape == [2*bs]
-    lat_dim = t.shape[1]
-    # Compute null space, which corresponds to the vectors which span each 
-    # (origin-shifted) plane
-    V = null_space_pytorch(w.unsqueeze(1))
-    import pdb; pdb.set_trace()
-    assert all([x.shape[0] == lat_dim and x.shape[1] == (lat_dim-1) 
-        for x in V])
-    V = torch.cat([x.unsqueeze(0) for x in V])
-    # Find translation vector of the plane by projecting origin onto hyperplane
-    coeff = - b / torch.norm(w, dim=1)**2
-    tra = coeff.unsqueeze(1) * w # transl.shape == [2*bs, lat_dim]
-    # Ensure translation vector is on hyperplane
-    dist_to_hyp = torch.matmul(w.unsqueeze(1), tra.unsqueeze(2)).squeeze() + b
-    assert torch.allclose(dist_to_hyp, torch.zeros_like(b), atol=1e-5)
-
-    # With these variables, we can think it terms of vector `x`, full of coeffs
-    # for the columns of V
-    # Return from homogeneous coordinates (divide by last entry of each vector)
-    coeffs = all_null_spaces[:, -1, :].unsqueeze(1)
-    mod_null_space = all_null_spaces[:, :-1, :] / coeffs
-    one_w = w[0]
-    one_b = b[0]
-    one_null_space = mod_null_space[0]
-    # Compute null spaces of each `w`
-    all_null_spaces = []
-    for curr_w, curr_b in zip(w, b):
-        # Compute current null space
-        curr_nll = null_space_pytorch(curr_w.unsqueeze(1).T)
-        all_null_spaces.append(curr_nll)
-
-    all_null_spaces = torch.cat([x.unsqueeze(0) for x in all_null_spaces])
-    # Now we have a system of the form
-    # Sigma @ (V @ x - p) = 0
-    # Where 
-    # --> Sigma (ellipse_mat) is the matrix parameterizing the ellipse
-    # --> V (all_null_spaces) is a matrix whose column vectors span the plane
-    # --> x is the coefficients of the vectors in V
-    # --> p (t) is the vector we want to project to the plane
-    # To solve this, we use least squares
-    targets = torch.matmul(ellipse_mat.unsqueeze(0), t.unsqueeze(2))
-    # targets.shape == [2*bs, lat_dim, 1]
-    A = torch.matmul(ellipse_mat.unsqueeze(0), all_null_spaces)
-    # A.shape == [2*bs, lat_dim, lat_dim-1]
-    # With these variables we have to solve A@x = targets through least squares
-    x = torch.linalg.lstsq(A, targets).solution
-    # x.shape == [2*bs, lat_dim-1, 1], which are the coefficients for each of
-    # the vectors that span the plane. Thus, the projection is given by V @ x
-    projs = torch.matmul(all_null_spaces, x)
-    # projs.shape == [2*bs, lat_dim, 1]
+    # The inner product in the numerator
+    dist = torch.matmul(w.unsqueeze(1), t.unsqueeze(2)).squeeze(2).squeeze(1) 
+    dist = dist + b
+    # The denominator, i.e. the norm of `w` under the sigma-norm
+    w_sigma_norm = sq_distance(ellipse_mat_inv, w.unsqueeze(2))
+    lambd = dist / w_sigma_norm
+    # The new direction of the vector
+    new_direction = torch.matmul(ellipse_mat_inv.unsqueeze(0), w.unsqueeze(2))
+    new_direction = new_direction.squeeze(2)
     
+    projs = t - new_direction * lambd.unsqueeze(1)
     return projs
 
 

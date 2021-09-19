@@ -8,7 +8,7 @@ from autoattack import AutoAttack
 from torch.optim import SGD, Adam
 from torchvision.transforms import Compose, Normalize
 from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
-    proj2region, in_subs, in_ellps)
+    proj2region, in_subs, in_ellps, sq_distance)
 
 # Script argument-dependent constants
 INP_RESOLS = { 'insightface' : 112, 'facenet' : 160 }
@@ -52,11 +52,13 @@ assert RED_ELLIPSE_MAT.size(0) == RED_ELLIPSE_MAT.size(1) == DIRS.size(1)
 N_DIRS = DIRS.size(1)
 DIRS_INV = torch.linalg.pinv(DIRS)
 RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
+ELLIPSE_MAT_INV = torch.linalg.inv(ELLIPSE_MAT)
+RED_ELLIPSE_MAT_INV = torch.linalg.inv(RED_ELLIPSE_MAT)
 
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)[:80]
+    return torch.from_numpy(lat_codes)
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -267,9 +269,9 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     norm = 'Lsigma2' # Or 'L2' or 'Linf'?
     adversary = AutoAttack(forward_pass, norm=norm, eps=-1., lin_comb=lin_comb)
     adversary.attacks_to_run = ['fab-t'] # , 'fab']
-    adversary.fab.n_restarts = 2
-    adversary.fab.n_target_classes = 9
-    adversary.fab.n_iter = 2
+    # adversary.fab.n_restarts = 2
+    # adversary.fab.n_target_classes = 9
+    # adversary.fab.n_iter = 2
     # Here we introduce the zeros, as we will be thinking in terms of deltas!
     deltas_orig = torch.zeros(labels.size(0), N_DIRS if lin_comb else EMB_SIZE)
     # Simulate image
@@ -286,8 +288,24 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         lat_codes+perturbation, transform, orig_embs, frs_method)
     preds = torch.argmin(all_dists, 1)
     success = preds != labels
-    
-    return deltas.detach().cpu(), success
+
+    magnitudes = check_deltas(deltas, lin_comb, check=False)
+    return deltas.detach().cpu(), success, magnitudes
+
+
+def check_deltas(deltas, lin_comb, check=True):
+    if lin_comb:
+        pert = (RED_DIRS @ deltas.T).T
+        magnitudes = sq_distance(RED_ELLIPSE_MAT, pert.unsqueeze(dim=2))
+        if check:
+            assert in_ellps(pert.T, RED_ELLIPSE_MAT, atol=5e-4)
+    else:
+        magnitudes = sq_distance(ELLIPSE_MAT, deltas.unsqueeze(dim=2))
+        if check:
+            assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, 
+                ELLIPSE_MAT)
+
+    return magnitudes
 
 
 def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name, 
@@ -342,13 +360,8 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
                 deltas = deltas.clone().detach().requires_grad_(True)
 
     # Final check of deltas
-    if lin_comb:
-        pert = (RED_DIRS @ deltas.T).T
-        assert in_ellps(pert.T, RED_ELLIPSE_MAT, atol=5e-4)
-    else:
-        assert in_subs(deltas.T, PROJ_MAT) and in_ellps(deltas.T, ELLIPSE_MAT)
-
-    return deltas.detach().cpu(), success
+    magnitudes = check_deltas(deltas, lin_comb)
+    return deltas.detach().cpu(), success, magnitudes
 
 
 def check_advs(labels, curr_preds, successes, args):
@@ -424,7 +437,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
     start = num_chunk * chunk_length
     lat_cods_chunk = lat_codes[start:(start+chunk_length)]
     # Iterate through batches
-    deltas, successes, all_labels = [], [], []
+    deltas, successes, mags, all_labels = [], [], [], []
     pbar = tqdm(generator.get_batch_inputs(lat_cods_chunk))
     n_succ, tot = 0, 0
     for idx, btch_cods in enumerate(pbar):
@@ -436,13 +449,13 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         all_labels.append(labels)
         # The actual computation of the adversaries
         if args.autoattack:
-            curr_deltas, succ = find_adversaries_autoattack(
+            curr_deltas, succ, magnitudes = find_adversaries_autoattack(
                 generator, net, btch_cods.to(device), labels, embs, 
                 frs_method=args.face_recog_method, transform=transform, 
                 lin_comb=args.lin_comb
             )
         else:
-            curr_deltas, succ = find_adversaries_pgd(
+            curr_deltas, succ, magnitudes = find_adversaries_pgd(
                 generator, net, btch_cods.to(device), labels, embs, 
                 opt_name=args.optim, lr=args.lr, iters=args.iters, 
                 momentum=args.momentum, frs_method=args.face_recog_method, 
@@ -456,9 +469,12 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         # Append results
         successes.append(succ)
         deltas.append(curr_deltas)
+        mags.append(magnitudes)
 
     all_labels = torch.cat(all_labels)
-    deltas, successes = torch.cat(deltas), torch.cat(successes)
+    mags = torch.cat(mags)
+    deltas = torch.cat(deltas)
+    successes = torch.cat(successes)
     n_succ = successes.sum()
 
     # Check the results
@@ -468,6 +484,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         # Get the output on the images for which deltas were found
         succ_lat_codes = lat_cods_chunk[successes]
         succ_deltas = deltas[successes]
+        succ_mags = mags[successes]
         if args.lin_comb:
             succ_deltas = (DIRS.to(deltas.device) @ succ_deltas.T).T
 
@@ -486,7 +503,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
         plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
-            conf_ims, args)
+            conf_ims, args, succ_mags)
     
     # Log the results
     results = { 'successes' : n_succ, 'instances' :  len(all_labels) }
@@ -495,17 +512,17 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
     return log_file
 
     
-def plot_advs(orig_ims, orig_labels, adv_ims, adv_labels, confu, args):
+def plot_advs(orig_ims, orig_labels, adv_ims, adv_labels, confu, args, mags):
     # Show in a plot
     args.LOGGER.info(f'Plotting adversaries')
-    for ori_im, ori_lab, adv_im, adv_lab, conf in zip(orig_ims, orig_labels, 
-            adv_ims, adv_labels, confu):
+    for ori_im, ori_lab, adv_im, adv_lab, conf, mag in zip(orig_ims, 
+            orig_labels, adv_ims, adv_labels, confu, mags):
         plt.figure()
         plt.subplot(131); plt.imshow(ori_im.cpu().permute(1, 2, 0).numpy())
         plt.axis('off'); plt.title('Original')
 
         plt.subplot(132); plt.imshow(adv_im.cpu().permute(1, 2, 0).numpy())
-        plt.axis('off'); plt.title('Adversary')
+        plt.axis('off'); plt.title(f'Adversary ({mag:4.3f})')
 
         plt.subplot(133); plt.imshow(conf.cpu().permute(1, 2, 0).numpy())
         plt.axis('off'); plt.title('Prediction')

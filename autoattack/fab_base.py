@@ -21,7 +21,8 @@ DEFAULT_EPS_DICT_BY_NORM = {'Linf': .3, 'L2': 1., 'L1': 5.0}
 
 # Modified by us
 from attack_utils.proj_utils import sq_distance
-from attack_utils.gen_utils import init_deltas, ELLIPSE_MAT, RED_ELLIPSE_MAT
+from attack_utils.gen_utils import (init_deltas, ELLIPSE_MAT, RED_ELLIPSE_MAT,
+    ELLIPSE_MAT_INV, RED_ELLIPSE_MAT_INV)
 
 class FABAttack():
     """
@@ -70,6 +71,7 @@ class FABAttack():
         self.n_target_classes = n_target_classes
         self.lin_comb = lin_comb
         self.mat = RED_ELLIPSE_MAT if self.lin_comb else ELLIPSE_MAT
+        self.mat_inv = RED_ELLIPSE_MAT_INV if self.lin_comb else ELLIPSE_MAT_INV
 
     def check_shape(self, x):
         return x if len(x.shape) > 0 else x.unsqueeze(0)
@@ -262,7 +264,7 @@ class FABAttack():
                             torch.cat((x1.reshape([bs, -1]), x0), 0),
                             torch.cat((w, w), 0),
                             torch.cat((b, b), 0),
-                            self.mat)
+                            self.mat_inv)
                         # d3.shape == [2*bs, lat_dim]
                     
                     # This is when the code extracts the d's for the current and
