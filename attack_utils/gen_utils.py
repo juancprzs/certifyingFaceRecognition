@@ -56,7 +56,7 @@ RED_DIRS_INV = torch.linalg.inv(RED_DIRS)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)
+    return torch.from_numpy(lat_codes)[:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -252,29 +252,50 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
     return all_dists, logits
 
 
-def run_autoattack(generator, net, lat_codes, labels, orig_embs, frs_method, 
-        transform):
-    forward_pass = lambda x: get_dists_and_logits(generator, net, 
-        x.squeeze(3).squeeze(2), transform, orig_embs, frs_method)[1]
-    norm = 'L2' # Or 'Linf'?
-    adversary = AutoAttack(forward_pass, norm=norm, eps=0.031)
-    adversary.attacks_to_run = ['fab', 'fab-t']
-    adversary.fab.n_restarts = 5
+def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
+        frs_method, transform, lin_comb):
+    # For running AutoAttack, we always think in terms of deltas: find 'deltas'
+    # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
+    # functions and initializations at 0.
+    def forward_pass(deltas):
+        deltas = deltas.squeeze(3).squeeze(2) # Remove dims for simulating ims
+        perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
+        inp = lat_codes + perturbation
+        return get_dists_and_logits(generator, net, inp, transform, orig_embs, 
+            frs_method)[1] # The logits
+    
+    norm = 'Lsigma2' # Or 'L2' or 'Linf'?
+    adversary = AutoAttack(forward_pass, norm=norm, eps=-1., lin_comb=lin_comb)
+    adversary.attacks_to_run = ['fab-t'] # , 'fab']
+    adversary.fab.n_restarts = 2
     adversary.fab.n_target_classes = 9
+    adversary.fab.n_iter = 2
+    # Here we introduce the zeros, as we will be thinking in terms of deltas!
+    deltas_orig = torch.zeros(labels.size(0), N_DIRS if lin_comb else EMB_SIZE)
     # Simulate image
-    lat_codes = lat_codes.unsqueeze(2).unsqueeze(3)
-    x_adv = adversary.run_standard_evaluation(lat_codes, labels, 
-        bs=generator.batch_size)
+    deltas_orig = deltas_orig.unsqueeze(2).unsqueeze(3)
+    deltas = adversary.run_standard_evaluation(x_orig=deltas_orig.to(DEVICE), 
+        y_orig=labels.to(DEVICE), bs=generator.batch_size)
+    deltas = deltas.squeeze(3).squeeze(2)
+
+    # Compute the predictions
+    # Perturb latent codes
+    perturbation = (DIRS @ deltas.T).T if lin_comb else deltas
+    # Compute current predictions and check for attack success
+    all_dists, _ = get_dists_and_logits(generator, net, 
+        lat_codes+perturbation, transform, orig_embs, frs_method)
+    preds = torch.argmin(all_dists, 1)
+    success = preds != labels
+    
+    return deltas.detach().cpu(), success
 
 
-def find_adversaries(generator, net, lat_codes, labels, orig_embs, opt_name, 
+def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name, 
         lr, iters, momentum, frs_method, loss_type, transform, random_init=True, 
         rand_init_on_surf=True, lin_comb=True, restarts=5):
-    # run_autoattack(generator, net, lat_codes, labels, orig_embs, frs_method, 
-    #     transform)
-    # First deltas as garbage
-    deltas_sz = N_DIRS if lin_comb else EMB_SIZE
-    deltas = float('nan') * torch.ones(lat_codes.size(0), deltas_sz).to(DEVICE)
+    # First deltas as garbage 
+    deltas = torch.ones(lat_codes.size(0), N_DIRS if lin_comb else EMB_SIZE)
+    deltas = (float('nan') * deltas).to(DEVICE)
     success = torch.zeros_like(labels, dtype=bool) # Not successful anywhere
     for idx_rest in range(restarts):
         # (Re-)Initialize deltas that haven't been successful
@@ -414,14 +435,21 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         labels += start # The offset induced by chunking
         all_labels.append(labels)
         # The actual computation of the adversaries
-        curr_deltas, succ = find_adversaries(
-            generator, net, btch_cods.to(device), labels, embs, 
-            opt_name=args.optim, lr=args.lr, iters=args.iters, 
-            momentum=args.momentum, frs_method=args.face_recog_method, 
-            loss_type=args.loss, transform=transform, random_init=True, 
-            rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb,
-            restarts=args.restarts
-        )
+        if args.autoattack:
+            curr_deltas, succ = find_adversaries_autoattack(
+                generator, net, btch_cods.to(device), labels, embs, 
+                frs_method=args.face_recog_method, transform=transform, 
+                lin_comb=args.lin_comb
+            )
+        else:
+            curr_deltas, succ = find_adversaries_pgd(
+                generator, net, btch_cods.to(device), labels, embs, 
+                opt_name=args.optim, lr=args.lr, iters=args.iters, 
+                momentum=args.momentum, frs_method=args.face_recog_method, 
+                loss_type=args.loss, transform=transform, random_init=True, 
+                rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb,
+                restarts=args.restarts
+            )
         n_succ += succ.sum()
         tot += batch_size
         pbar.set_description(f'-> {n_succ} adversaries for {tot} identities')

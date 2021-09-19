@@ -33,14 +33,16 @@ def set_seed(device, seed=111):
         torch.cuda.manual_seed_all(seed)
 
 
-def sq_distance(A, shifted):
+def sq_distance(A, shifted1, shifted2=None):
+    if shifted2 is None:
+        shifted2 = shifted1 
     if isinstance(A, torch.Tensor):
-        transp = shifted.permute(0, 2, 1).contiguous()
-        temp = torch.bmm(A.repeat(shifted.size(0), 1, 1), shifted)
+        transp = shifted1.permute(0, 2, 1).contiguous()
+        temp = torch.bmm(A.repeat(shifted1.size(0), 1, 1), shifted2)
         result = torch.bmm(transp, temp)
     else:
-        transp = np.transpose(shifted, (0, 2, 1))
-        temp = np.matmul(A, shifted)
+        transp = np.transpose(shifted1, (0, 2, 1))
+        temp = np.matmul(A, shifted2)
         result = np.matmul(transp, temp)
     
     return result.reshape(-1)

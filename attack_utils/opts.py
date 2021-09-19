@@ -22,6 +22,8 @@ def parse_args():
 		                help='Compute adv in terms of lin. comb. of directions')
     parser.add_argument('--restarts', type=int, default=5, 
                         help='num of chunks in which to break the dataset')
+    parser.add_argument('--autoattack', action='store_true', default=False,
+                        help='Use FAB from AutoAttack')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')
