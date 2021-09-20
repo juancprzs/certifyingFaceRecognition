@@ -17,7 +17,7 @@ import torch
 from autoattack.fab_projections import projection_linf, projection_l2,\
     projection_l1, projection_lsigma2 # Our modification
 
-DEFAULT_EPS_DICT_BY_NORM = {'Linf': .3, 'L2': 1., 'L1': 5.0}
+DEFAULT_EPS_DICT_BY_NORM = {'Linf': .3, 'L2': 1., 'L1': 5.0, 'Lsigma2': None}
 
 # Modified by us
 from attack_utils.proj_utils import sq_distance
@@ -201,10 +201,8 @@ class FABAttack():
                         # dg.shape == if lin_comb: [bs, n_classes, N_DIRS, 1, 1]
                         #   else [bs, n_classes, lat_dim, 1, 1]
                     if self.norm == 'Linf':
-                        dist1 = df.abs() / (1e-12 +
-                                            dg.abs()
-                                            .reshape(dg.shape[0], dg.shape[1], -1)
-                                            .sum(dim=-1))
+                        dist1 = df.abs() / (1e-12 + dg.abs().reshape(
+                            dg.shape[0], dg.shape[1], -1).sum(dim=-1))
                     elif self.norm == 'L1':
                         dist1 = df.abs() / (1e-12 + dg.abs().reshape(
                             [df.shape[0], df.shape[1], -1]).max(dim=2)[0])
@@ -222,8 +220,8 @@ class FABAttack():
                         # Combine dimensions
                         bs, n_cls = dg.size(0), dg.size(1)
                         temp_dg = temp_dg.reshape(bs * n_cls, -1, 1)
-                        # Compute the distances
-                        coeff = torch.sqrt(sq_distance(self.mat, temp_dg))
+                        # Compute the distances (this is with the dual norm!)
+                        coeff = torch.sqrt(sq_distance(self.mat_inv, temp_dg))
                         # Segment dimensions
                         coeff = coeff.reshape(bs, n_cls)
                         dist1 = df.abs() / (coeff + 1e-12)

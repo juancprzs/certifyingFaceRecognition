@@ -29,9 +29,12 @@ class AutoAttack():
         
         if not self.is_tf_model:
             from .autopgd_base import APGDAttack
-            self.apgd = APGDAttack(self.model, n_restarts=5, n_iter=100, verbose=False,
-                eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, seed=self.seed,
-                device=self.device, logger=self.logger)
+            self.apgd = APGDAttack(
+                self.model, n_restarts=5, n_iter=100, verbose=False, 
+                eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
+                seed=self.seed, device=self.device, logger=self.logger, 
+                lin_comb=self.lin_comb
+            )
             
             from .fab_pt import FABAttack_PT
             self.fab = FABAttack_PT(
@@ -45,9 +48,12 @@ class AutoAttack():
                 n_restarts=1, seed=self.seed, verbose=False, device=self.device, resc_schedule=False)
                 
             from .autopgd_base import APGDAttack_targeted
-            self.apgd_targeted = APGDAttack_targeted(self.model, n_restarts=1, n_iter=100, verbose=False,
-                eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, seed=self.seed, device=self.device,
-                logger=self.logger)
+            self.apgd_targeted = APGDAttack_targeted(
+                self.model, n_restarts=1, n_iter=100, verbose=False, 
+                eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
+                seed=self.seed, device=self.device, logger=self.logger, 
+                lin_comb=self.lin_comb
+            )
     
         else:
             from .autopgd_base import APGDAttack
@@ -273,7 +279,7 @@ class AutoAttack():
         
         if version == 'standard':
             self.attacks_to_run = ['apgd-ce', 'apgd-t', 'fab-t', 'square']
-            if self.norm in ['Linf', 'L2']:
+            if self.norm in ['Linf', 'L2', 'Lsigma2']:
                 self.apgd.n_restarts = 1
                 self.apgd_targeted.n_target_classes = 9
             elif self.norm in ['L1']:

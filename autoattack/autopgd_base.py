@@ -15,6 +15,11 @@ import random
 from autoattack.other_utils import L0_norm, L1_norm, L2_norm
 from autoattack.checks import check_zero_gradients
 
+# Modified by us
+from attack_utils.proj_utils import sq_distance
+from attack_utils.gen_utils import (init_deltas, ELLIPSE_MAT, RED_ELLIPSE_MAT,
+    ELLIPSE_MAT_INV, RED_ELLIPSE_MAT_INV)
+
 
 def L1_projection(x2, y2, eps1):
     '''
@@ -118,14 +123,15 @@ class APGDAttack():
             device=None,
             use_largereps=False,
             is_tf_model=False,
-            logger=None):
+            logger=None,
+            lin_comb=False):
         """
         AutoPGD implementation in PyTorch
         """
         
         self.model = predict
         self.n_iter = n_iter
-        self.eps = eps
+        self.eps = 1. # eps # do NOT use the passed parameter
         self.norm = norm
         self.n_restarts = n_restarts
         self.seed = seed
@@ -141,13 +147,16 @@ class APGDAttack():
         #self.larger_epss = None
         #self.iters = None
         self.n_iter_orig = n_iter + 0
-        self.eps_orig = eps + 0.
+        self.eps_orig = self.eps + 0.
         self.is_tf_model = is_tf_model
         self.y_target = None
         self.logger = logger
+        self.lin_comb = lin_comb
+        self.mat = RED_ELLIPSE_MAT if self.lin_comb else ELLIPSE_MAT
+        self.mat_inv = RED_ELLIPSE_MAT_INV if self.lin_comb else ELLIPSE_MAT_INV
     
     def init_hyperparam(self, x):
-        assert self.norm in ['Linf', 'L2', 'L1']
+        assert self.norm in ['Linf', 'L2', 'L1', 'Lsigma2']
         assert not self.eps is None
 
         if self.device is None:
@@ -181,20 +190,31 @@ class APGDAttack():
             t = x.abs().view(x.shape[0], -1).max(1)[0]
             return x / (t.view(-1, *([1] * self.ndims)) + 1e-12)
 
-        elif self.norm == 'L2':
-            t = (x ** 2).view(x.shape[0], -1).sum(-1).sqrt()
-            return x / (t.view(-1, *([1] * self.ndims)) + 1e-12)
-
         elif self.norm == 'L1':
             try:
                 t = x.abs().view(x.shape[0], -1).sum(dim=-1)
             except:
                 t = x.abs().reshape([x.shape[0], -1]).sum(dim=-1)
             return x / (t.view(-1, *([1] * self.ndims)) + 1e-12)
+        
+        elif self.norm == 'L2':
+            t = (x ** 2).view(x.shape[0], -1).sum(-1).sqrt()
+            return x / (t.view(-1, *([1] * self.ndims)) + 1e-12)
+
+        elif self.norm == 'Lsigma2':
+            # t = (x ** 2).view(x.shape[0], -1).sum(-1).sqrt()
+            # Compute the distances
+            t = sq_distance(self.mat, x.squeeze(3)).sqrt()
+            coeff = t.view(-1, *([1] * self.ndims))
+            return x / (coeff + 1e-12)
     
     def lp_norm(self, x):
         if self.norm == 'L2':
             t = (x ** 2).view(x.shape[0], -1).sum(-1).sqrt()
+            return t.view(-1, *([1] * self.ndims))
+        elif self.norm == 'Lsigma2':
+            # t = (x ** 2).view(x.shape[0], -1).sum(-1).sqrt()
+            t = sq_distance(self.mat, x.squeeze(3)).sqrt()
             return t.view(-1, *([1] * self.ndims))
 
     def dlr_loss(self, x, y):
@@ -216,14 +236,21 @@ class APGDAttack():
             t = 2 * torch.rand(x.shape).to(self.device).detach() - 1
             x_adv = x + self.eps * torch.ones_like(x
                 ).detach() * self.normalize(t)
-        elif self.norm == 'L2':
-            t = torch.randn(x.shape).to(self.device).detach()
-            x_adv = x + self.eps * torch.ones_like(x
-                ).detach() * self.normalize(t)
         elif self.norm == 'L1':
             t = torch.randn(x.shape).to(self.device).detach()
             delta = L1_projection(x, t, self.eps)
             x_adv = x + t + delta
+        elif self.norm == 'L2':
+            t = torch.randn(x.shape).to(self.device).detach()
+            x_adv = x + self.eps * torch.ones_like(x
+                ).detach() * self.normalize(t)
+        elif self.norm == 'Lsigma2':
+            # t = torch.randn(x.shape).to(self.device).detach()
+            # x_adv = x + self.eps * torch.ones_like(x
+            #     ).detach() * self.normalize(t)
+            deltas = init_deltas(random_init=True, lin_comb=self.lin_comb, 
+                n_vecs=x.size(0), on_surface=True)
+            x_adv = x + deltas.unsqueeze(2).unsqueeze(3)
             
         
         
@@ -235,8 +262,8 @@ class APGDAttack():
                 print('[custom init] L1 perturbation {:.5f}'.format(
                     (x_adv - x).abs().view(x.shape[0], -1).sum(1).max()))
             
-        
-        x_adv = x_adv.clamp(0., 1.)
+        # This line assumes image input
+        # x_adv = x_adv.clamp(0., 1.)
         x_best = x_adv.clone()
         x_best_adv = x_adv.clone()
         loss_steps = torch.zeros([self.n_iter, x.shape[0]]
@@ -275,7 +302,10 @@ class APGDAttack():
         for _ in range(self.eot_iter):
             if not self.is_tf_model:
                 with torch.enable_grad():
-                    logits = self.model(x_adv)
+                    try:
+                        logits = self.model(x_adv)
+                    except:
+                        import pdb; pdb.set_trace()
                     loss_indiv = criterion_indiv(logits, y)
                     loss = loss_indiv.sum()
 
@@ -299,7 +329,8 @@ class APGDAttack():
         acc_steps[0] = acc + 0
         loss_best = loss_indiv.detach().clone()
 
-        alpha = 2. if self.norm in ['Linf', 'L2'] else 1. if self.norm in ['L1'] else 2e-2
+        # alpha = 2. if self.norm in ['Linf', 'L2'] else 1. if self.norm in ['L1'] else 2e-2
+        alpha = 2. if self.norm in ['Linf', 'L2', 'Lsigma2'] else 1. if self.norm in ['L1'] else 2e-2
         step_size = alpha * self.eps * torch.ones([x.shape[0], *(
             [1] * self.ndims)]).to(self.device).detach()
         x_adv_old = x_adv.clone()
@@ -343,15 +374,6 @@ class APGDAttack():
                         x_adv + (x_adv_1 - x_adv) * a + grad2 * (1 - a),
                         x - self.eps), x + self.eps), 0.0, 1.0)
 
-                elif self.norm == 'L2':
-                    x_adv_1 = x_adv + step_size * self.normalize(grad)
-                    x_adv_1 = torch.clamp(x + self.normalize(x_adv_1 - x
-                        ) * torch.min(self.eps * torch.ones_like(x).detach(),
-                        self.lp_norm(x_adv_1 - x)), 0.0, 1.0)
-                    x_adv_1 = x_adv + (x_adv_1 - x_adv) * a + grad2 * (1 - a)
-                    x_adv_1 = torch.clamp(x + self.normalize(x_adv_1 - x
-                        ) * torch.min(self.eps * torch.ones_like(x).detach(),
-                        self.lp_norm(x_adv_1 - x)), 0.0, 1.0)
 
                 elif self.norm == 'L1':
                     grad_topk = grad.abs().view(x.shape[0], -1).sort(-1)[0]
@@ -366,7 +388,38 @@ class APGDAttack():
                     delta_p = L1_projection(x, delta_u, self.eps)
                     x_adv_1 = x + delta_u + delta_p
                     
+                elif self.norm == 'L2':
+                    x_adv_1 = x_adv + step_size * self.normalize(grad)
+                    x_adv_1 = torch.clamp(x + self.normalize(x_adv_1 - x
+                        ) * torch.min(self.eps * torch.ones_like(x).detach(),
+                        self.lp_norm(x_adv_1 - x)), 0.0, 1.0)
+                    x_adv_1 = x_adv + (x_adv_1 - x_adv) * a + grad2 * (1 - a)
+                    x_adv_1 = torch.clamp(x + self.normalize(x_adv_1 - x
+                        ) * torch.min(self.eps * torch.ones_like(x).detach(),
+                        self.lp_norm(x_adv_1 - x)), 0.0, 1.0)
+                
+                elif self.norm == 'Lsigma2':
+                    x_adv_1 = x_adv + step_size * self.normalize(grad)
+                    # x_adv_1 will be x + one step in this direction:
+                    term1 = self.normalize(x_adv_1 - x) 
+                    curr_norm = self.lp_norm(x_adv_1 - x)
+                    term2 = torch.min(
+                        self.eps * torch.ones_like(x).detach(), curr_norm
+                    )
+                    x_adv_1 = x + term1 * term2
+                    # This assumes image as input
+                    # x_adv_1 = torch.clamp(x_adv_1, 0.0, 1.0)
+                    x_adv_1 = x_adv + (x_adv_1 - x_adv) * a + grad2 * (1 - a)
+                    term3 = self.normalize(x_adv_1 - x)
+                    curr_norm2 = self.lp_norm(x_adv_1 - x)
+                    term4 = torch.min(
+                        self.eps * torch.ones_like(x).detach(), curr_norm2
+                    )
+                    x_adv_1 = x + term3 * term4
+                    # This assumes image as input
+                    # x_adv_1 = torch.clamp(, 0.0, 1.0)
                     
+                # WTH?
                 x_adv = x_adv_1 + 0.
 
             ### get gradient
@@ -382,9 +435,12 @@ class APGDAttack():
                     grad += torch.autograd.grad(loss, [x_adv])[0].detach()
                 else:
                     if self.y_target is None:
-                        logits, loss_indiv, grad_curr = criterion_indiv(x_adv, y)
+                        logits, loss_indiv, grad_curr = criterion_indiv(x_adv, 
+                            y)
                     else:
-                        logits, loss_indiv, grad_curr = criterion_indiv(x_adv, y, self.y_target)
+                        logits, loss_indiv, grad_curr = criterion_indiv(x_adv, 
+                            y, self.y_target)
+                    
                     grad += grad_curr
             
             grad /= float(self.eot_iter)
@@ -414,7 +470,7 @@ class APGDAttack():
               counter3 += 1
 
               if counter3 == k:
-                  if self.norm in ['Linf', 'L2']:
+                  if self.norm in ['Linf', 'L2', 'Lsigma2']:
                       fl_oscillation = self.check_oscillation(loss_steps, i, k,
                           loss_best, k3=self.thr_decr)
                       fl_reduce_no_impr = (1. - reduced_last_check) * (
@@ -513,19 +569,21 @@ class APGDAttack():
                 if len(ind_to_fool.shape) == 0:
                     ind_to_fool = ind_to_fool.unsqueeze(0)
                 if ind_to_fool.numel() != 0:
-                    x_to_fool = x[ind_to_fool].clone()
-                    y_to_fool = y[ind_to_fool].clone()
-                    
+                    x_to_fool = x.clone() # x[ind_to_fool].clone()
+                    y_to_fool = y.clone() # y[ind_to_fool].clone()
                     
                     if not self.use_largereps:
                         res_curr = self.attack_single_run(x_to_fool, y_to_fool)
                     else:
-                        res_curr = self.decr_eps_pgd(x_to_fool, y_to_fool, epss, iters)
+                        res_curr = self.decr_eps_pgd(x_to_fool, y_to_fool, epss, 
+                            iters)
                     best_curr, acc_curr, loss_curr, adv_curr = res_curr
                     ind_curr = (acc_curr == 0).nonzero().squeeze()
 
-                    acc[ind_to_fool[ind_curr]] = 0
-                    adv[ind_to_fool[ind_curr]] = adv_curr[ind_curr].clone()
+                    # acc[ind_to_fool[ind_curr]] = 0
+                    acc[ind_curr] = 0
+                    # adv[ind_to_fool[ind_curr]] = adv_curr[ind_curr].clone()
+                    adv[ind_curr] = adv_curr[ind_curr].clone()
                     if self.verbose:
                         print('restart {} - robust accuracy: {:.2%}'.format(
                             counter, acc.float().mean()),
@@ -591,17 +649,20 @@ class APGDAttack_targeted(APGDAttack):
             device=None,
             use_largereps=False,
             is_tf_model=False,
-            logger=None):
+            logger=None,
+            lin_comb=False):
         """
         AutoPGD on the targeted DLR loss
         """
         super(APGDAttack_targeted, self).__init__(predict, n_iter=n_iter, norm=norm,
             n_restarts=n_restarts, eps=eps, seed=seed, loss='dlr-targeted',
             eot_iter=eot_iter, rho=rho, topk=topk, verbose=verbose, device=device,
-            use_largereps=use_largereps, is_tf_model=is_tf_model, logger=logger)
+            use_largereps=use_largereps, is_tf_model=is_tf_model, logger=logger,
+            lin_comb=lin_comb)
 
         self.y_target = None
         self.n_target_classes = n_target_classes
+        self.lin_comb = lin_comb
 
     def dlr_loss_targeted(self, x, y):
         x_sorted, ind_sorted = x.sort(dim=1)
@@ -669,8 +730,8 @@ class APGDAttack_targeted(APGDAttack):
                 if len(ind_to_fool.shape) == 0:
                     ind_to_fool = ind_to_fool.unsqueeze(0)
                 if ind_to_fool.numel() != 0:
-                    x_to_fool = x[ind_to_fool].clone()
-                    y_to_fool = y[ind_to_fool].clone()
+                    x_to_fool = x.clone() # x[ind_to_fool].clone()
+                    y_to_fool = y.clone() # y[ind_to_fool].clone()
                     
                     if not self.is_tf_model:
                         output = self.model(x_to_fool)
@@ -685,8 +746,10 @@ class APGDAttack_targeted(APGDAttack):
                     best_curr, acc_curr, loss_curr, adv_curr = res_curr
                     ind_curr = (acc_curr == 0).nonzero().squeeze()
 
-                    acc[ind_to_fool[ind_curr]] = 0
-                    adv[ind_to_fool[ind_curr]] = adv_curr[ind_curr].clone()
+                    # acc[ind_to_fool[ind_curr]] = 0
+                    acc[ind_curr] = 0
+                    # adv[ind_to_fool[ind_curr]] = adv_curr[ind_curr].clone()
+                    adv[ind_curr] = adv_curr[ind_curr].clone()
                     if self.verbose:
                         print('target class {}'.format(target_class),
                             '- restart {} - robust accuracy: {:.2%}'.format(

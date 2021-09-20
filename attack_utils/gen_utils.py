@@ -58,7 +58,7 @@ RED_ELLIPSE_MAT_INV = torch.linalg.inv(RED_ELLIPSE_MAT)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)
+    return torch.from_numpy(lat_codes) # [:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -255,7 +255,7 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
-        frs_method, transform, lin_comb):
+        frs_method, transform, lin_comb, attack_type):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
     # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
     # functions and initializations at 0.
@@ -266,18 +266,33 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         return get_dists_and_logits(generator, net, inp, transform, orig_embs, 
             frs_method)[1] # The logits
     
-    norm = 'Lsigma2' # Or 'L2' or 'Linf'?
-    adversary = AutoAttack(forward_pass, norm=norm, eps=-1., lin_comb=lin_comb)
-    adversary.attacks_to_run = ['fab-t'] # , 'fab']
-    # adversary.fab.n_restarts = 2
-    # adversary.fab.n_target_classes = 9
-    # adversary.fab.n_iter = 2
+    # `eps` is set inside AutoAttack (the passed param should be inocuous)
+    adversary = AutoAttack(forward_pass, norm='Lsigma2', eps=None, 
+        lin_comb=lin_comb)
+    adversary.attacks_to_run = [attack_type]
+    if attack_type == 'fab-t':
+        # import pdb; pdb.set_trace()
+        adversary.fab.n_restarts = 5 # Default is 5
+        adversary.fab.n_target_classes = 10 # Default is 9
+        adversary.fab.n_iter = 50 # Default is 100
+    elif attack_type == 'fab': # This is intractable
+        adversary.fab.n_restarts = 1
+        adversary.fab.n_iter = 1
+    elif attack_type in ['apgd-ce', 'apgd-dlr', 'apgd-t']:
+        # adversary.apgd.n_restarts = 1 # 5
+        # adversary.apgd.n_iter = 100
+        x = 2
+        # adversary.apgd_targeted.n_iter = 10
+        # adversary.apgd_targeted.n_target_classes = 9
+        # adversary.apgd_targeted.n_restarts = 1
+
     # Here we introduce the zeros, as we will be thinking in terms of deltas!
     deltas_orig = torch.zeros(labels.size(0), N_DIRS if lin_comb else EMB_SIZE)
-    # Simulate image
+    # Simulate images for AutoAttack
     deltas_orig = deltas_orig.unsqueeze(2).unsqueeze(3)
     deltas = adversary.run_standard_evaluation(x_orig=deltas_orig.to(DEVICE), 
         y_orig=labels.to(DEVICE), bs=generator.batch_size)
+    # Remove dims for simulating images
     deltas = deltas.squeeze(3).squeeze(2)
 
     # Compute the predictions
@@ -289,7 +304,9 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     preds = torch.argmin(all_dists, 1)
     success = preds != labels
 
-    magnitudes = check_deltas(deltas, lin_comb, check=False)
+    check = attack_type not in ['fab', 'fab-t'] # FAB attack is minimum norm
+    magnitudes = check_deltas(deltas, lin_comb, check=check)
+
     return deltas.detach().cpu(), success, magnitudes
 
 
@@ -448,13 +465,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         labels += start # The offset induced by chunking
         all_labels.append(labels)
         # The actual computation of the adversaries
-        if args.autoattack:
-            curr_deltas, succ, magnitudes = find_adversaries_autoattack(
-                generator, net, btch_cods.to(device), labels, embs, 
-                frs_method=args.face_recog_method, transform=transform, 
-                lin_comb=args.lin_comb
-            )
-        else:
+        if args.attack_type == 'manual':
             curr_deltas, succ, magnitudes = find_adversaries_pgd(
                 generator, net, btch_cods.to(device), labels, embs, 
                 opt_name=args.optim, lr=args.lr, iters=args.iters, 
@@ -462,6 +473,12 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 loss_type=args.loss, transform=transform, random_init=True, 
                 rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb,
                 restarts=args.restarts
+            )
+        else:
+            curr_deltas, succ, magnitudes = find_adversaries_autoattack(
+                generator, net, btch_cods.to(device), labels, embs, 
+                frs_method=args.face_recog_method, transform=transform, 
+                lin_comb=args.lin_comb, attack_type=args.attack_type
             )
         n_succ += succ.sum()
         tot += batch_size
