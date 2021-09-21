@@ -59,7 +59,7 @@ RED_ELLIPSE_MAT_INV = torch.linalg.inv(RED_ELLIPSE_MAT)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes) # [:80]
+    return torch.from_numpy(lat_codes)[:80]
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -272,11 +272,10 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         lin_comb=lin_comb)
     adversary.seed = 42
     adversary.attacks_to_run = [attack_type]
-    if attack_type == 'fab-t': 
-        # import pdb; pdb.set_trace()
-        adversary.fab.n_restarts = 10 # Default is 5
-        adversary.fab.n_target_classes = 10 # Default is 9
-        adversary.fab.n_iter = 10 # Default is 100
+    if attack_type == 'fab-t':
+        adversary.fab.n_restarts = 1 # 0 # Default is 5
+        adversary.fab.n_target_classes = 1 # 0 # Default is 9
+        adversary.fab.n_iter = 1 # 0 # Default is 100
     elif attack_type == 'fab': # This is INTRACTABLE
         adversary.fab.n_restarts = 1
         adversary.fab.n_iter = 1
@@ -284,9 +283,9 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         # adversary.apgd.n_restarts = 1 # 5
         # adversary.apgd.n_iter = 100
         x = 2
-        # adversary.apgd_targeted.n_iter = 10
-        # adversary.apgd_targeted.n_target_classes = 9
-        # adversary.apgd_targeted.n_restarts = 1
+        adversary.apgd_targeted.n_iter = 10
+        adversary.apgd_targeted.n_target_classes = 5
+        adversary.apgd_targeted.n_restarts = 5
 
     # Here we introduce the zeros, as we will be thinking in terms of deltas!
     deltas_orig = torch.zeros(labels.size(0), N_DIRS if lin_comb else EMB_SIZE)
@@ -396,14 +395,15 @@ def check_advs(labels, curr_preds, successes, args):
         return True
 
 
-def save_results(results, deltas, successes, num_chunk, args):
+def save_results(results, deltas, successes, magnitudes, num_chunk, args):
     filename = f'results_chunk{num_chunk}of{args.chunks}'
     # Save the deltas and successes
     data_file = osp.join(args.results_dir, f'{filename}.pth')
     if successes.sum() != 0:
         data = { 
             'deltas' : deltas[successes].detach(), 
-            'successes' : torch.nonzero(successes).detach() 
+            'successes' : torch.nonzero(successes).detach(),
+            'magnitudes' : magnitudes[successes].detach(), 
         }
         torch.save(data, data_file)
         flag = 'WAS'
@@ -424,19 +424,25 @@ def save_results(results, deltas, successes, num_chunk, args):
 
 def eval_files(log_files, args):
     print(f'Evaluating based on these {len(log_files)} files: ', log_files)
-    tot_instances, tot_successes = 0, 0
+    tot_instances, tot_successes, tot_magnitudes = 0, 0, 0.
     for log_file in log_files:
         with open(log_file, 'r') as f:
             lines = f.readlines()
         lines = [l.strip() for l in lines]
         data = { l.split(':')[0] : float(l.split(':')[1]) for l in lines }
         tot_instances += int(data.pop('instances'))
-        tot_successes += int(data.pop('successes'))
+        curr_successes = data.pop('successes')
+        tot_successes += int(curr_successes)
+        curr_magnitude = float(data.pop('avg_mags'))
+        tot_magnitudes += curr_magnitude * float(curr_successes)
+
 
     attack_success_rate = 100.*float(tot_successes) / tot_instances
+    avg_magnitude = tot_magnitudes / tot_successes
     info = f'successes:{tot_successes}\n' \
         f'instances:{tot_instances}\n' \
-        f'rate:{attack_success_rate:4.2f}'
+        f'rate:{attack_success_rate:4.2f}\n' \
+        f'avg_mag:{avg_magnitude:4.2f}'   
 
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
@@ -530,14 +536,19 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         # Plot the images and their adversaries
         plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
             conf_ims, args, succ_mags)
-        avg_pert = magnitudes[successes].mean()
+        avg_pert = magnitudes[successes].mean().item()
         args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
             f'-> avg. pert.: {avg_pert:3.4f}')
     
     # Log the results
-    results = { 'successes' : n_succ, 'instances' :  len(all_labels) }
+    results = {
+        'successes' : n_succ,
+        'instances' : len(all_labels),
+        'avg_mags' : avg_pert if n_succ != 0 else 0
+    }
     # Store adversaries and the successes
-    log_file = save_results(results, deltas, successes, num_chunk, args)
+    log_file = save_results(results, deltas, successes, magnitudes, num_chunk, 
+        args)
     return log_file
 
     
