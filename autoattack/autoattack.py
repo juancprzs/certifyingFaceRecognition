@@ -183,7 +183,7 @@ class AutoAttack():
                     elif attack == 'fab-t':
                         # fab targeted
                         self.fab.targeted = True
-                        self.fab.n_restarts = 1
+                        # self.fab.n_restarts = 1 # don't modify the restarts
                         self.fab.seed = self.get_seed()
                         adv_curr = self.fab.perturb(x, y)
                     

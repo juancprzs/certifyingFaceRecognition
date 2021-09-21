@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+from time import time
 import os.path as osp
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -269,13 +270,14 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     # `eps` is set inside AutoAttack (the passed param should be inocuous)
     adversary = AutoAttack(forward_pass, norm='Lsigma2', eps=None, 
         lin_comb=lin_comb)
+    adversary.seed = 42
     adversary.attacks_to_run = [attack_type]
-    if attack_type == 'fab-t':
+    if attack_type == 'fab-t': 
         # import pdb; pdb.set_trace()
-        adversary.fab.n_restarts = 5 # Default is 5
+        adversary.fab.n_restarts = 10 # Default is 5
         adversary.fab.n_target_classes = 10 # Default is 9
-        adversary.fab.n_iter = 50 # Default is 100
-    elif attack_type == 'fab': # This is intractable
+        adversary.fab.n_iter = 10 # Default is 100
+    elif attack_type == 'fab': # This is INTRACTABLE
         adversary.fab.n_restarts = 1
         adversary.fab.n_iter = 1
     elif attack_type in ['apgd-ce', 'apgd-dlr', 'apgd-t']:
@@ -442,6 +444,7 @@ def eval_files(log_files, args):
 
 def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
         args):
+    start_time = time()
     args.LOGGER.info(f'Processing chunk {num_chunk} out of {args.chunks}')
     chunk_length = len(lat_codes) / args.chunks
     # Ensure chunk length is valid
@@ -454,7 +457,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
     start = num_chunk * chunk_length
     lat_cods_chunk = lat_codes[start:(start+chunk_length)]
     # Iterate through batches
-    deltas, successes, mags, all_labels = [], [], [], []
+    deltas, successes, magnitudes, all_labels = [], [], [], []
     pbar = tqdm(generator.get_batch_inputs(lat_cods_chunk))
     n_succ, tot = 0, 0
     for idx, btch_cods in enumerate(pbar):
@@ -466,7 +469,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         all_labels.append(labels)
         # The actual computation of the adversaries
         if args.attack_type == 'manual':
-            curr_deltas, succ, magnitudes = find_adversaries_pgd(
+            curr_deltas, succ, mags = find_adversaries_pgd(
                 generator, net, btch_cods.to(device), labels, embs, 
                 opt_name=args.optim, lr=args.lr, iters=args.iters, 
                 momentum=args.momentum, frs_method=args.face_recog_method, 
@@ -475,33 +478,39 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 restarts=args.restarts
             )
         else:
-            curr_deltas, succ, magnitudes = find_adversaries_autoattack(
+            curr_deltas, succ, mags = find_adversaries_autoattack(
                 generator, net, btch_cods.to(device), labels, embs, 
                 frs_method=args.face_recog_method, transform=transform, 
                 lin_comb=args.lin_comb, attack_type=args.attack_type
             )
-        n_succ += succ.sum()
+        
         tot += batch_size
-        pbar.set_description(f'-> {n_succ} adversaries for {tot} identities')
+        n_succ += succ.sum()
         # Append results
         successes.append(succ)
+        magnitudes.append(mags)
         deltas.append(curr_deltas)
-        mags.append(magnitudes)
+        # Show update
+        avg_pert = torch.cat(magnitudes)[torch.cat(successes)].mean()
+        pbar.set_description(
+            f'-> {n_succ} advs for {tot} IDs -> avg. pert.: {avg_pert:3.4f}')
 
-    all_labels = torch.cat(all_labels)
-    mags = torch.cat(mags)
     deltas = torch.cat(deltas)
     successes = torch.cat(successes)
+    magnitudes = torch.cat(magnitudes)
+    all_labels = torch.cat(all_labels)
     n_succ = successes.sum()
+    tot_time = time() - start_time
+    args.LOGGER.info(f'Finished chunk computation. Time={tot_time:3.2f}s')
 
     # Check the results
     if n_succ == 0: # No successes
         args.LOGGER.info('Didnt find any adversary! =(')
     else:
         # Get the output on the images for which deltas were found
-        succ_lat_codes = lat_cods_chunk[successes]
         succ_deltas = deltas[successes]
-        succ_mags = mags[successes]
+        succ_mags = magnitudes[successes]
+        succ_lat_codes = lat_cods_chunk[successes]
         if args.lin_comb:
             succ_deltas = (DIRS.to(deltas.device) @ succ_deltas.T).T
 
@@ -521,6 +530,9 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         # Plot the images and their adversaries
         plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
             conf_ims, args, succ_mags)
+        avg_pert = magnitudes[successes].mean()
+        args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
+            f'-> avg. pert.: {avg_pert:3.4f}')
     
     # Log the results
     results = { 'successes' : n_succ, 'instances' :  len(all_labels) }

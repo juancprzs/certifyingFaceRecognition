@@ -234,7 +234,8 @@ class FABAttack():
                     # account the ellipse matrix
                     # Remove dims for simulating images
                     # term_add = (dg2 * x1).reshape(x1.shape[0], -1).sum(dim=-1)
-                    term_add = sq_distance(self.mat, dg2.squeeze(3), x1.squeeze(3))
+                    term_add = sq_distance(self.mat, dg2.squeeze(3), 
+                        x1.squeeze(3))
                     b = -df[u1, ind] + term_add
                     w = dg2.reshape([bs, -1])
 
@@ -313,7 +314,10 @@ class FABAttack():
                     # x1 = x1.clamp(0.0, 1.0)
 
                     is_adv = self._get_predicted_label(x1) != la2
-
+                    # Compute where x1 is NaN
+                    # is_nan = torch.isnan(x1.sum((1,2,3)))
+                    # Correct inds according to this
+                    # is_adv = is_adv & ~is_nan
                     if is_adv.sum() > 0:
                         ind_adv = is_adv.nonzero().squeeze()
                         ind_adv = self.check_shape(ind_adv)
@@ -335,14 +339,13 @@ class FABAttack():
                             # t = t.sum(dim=-1).sqrt()
                             t = sq_distance(self.mat, diff.squeeze(3)).sqrt()
                         
-                        adv[ind_adv] = x1[ind_adv] * (t < res2[ind_adv]).\
-                            float().reshape([-1, *[1]*self.ndims]) + adv[ind_adv]\
-                            * (t >= res2[ind_adv]).float().reshape(
-                            [-1, *[1]*self.ndims])
-                        res2[ind_adv] = t * (t < res2[ind_adv]).float()\
-                            + res2[ind_adv] * (t >= res2[ind_adv]).float()
-                        x1[ind_adv] = im2[ind_adv] + (
-                            x1[ind_adv] - im2[ind_adv]) * self.beta
+                        where_less = (t < res2[ind_adv]).float()
+                        where_more = (t >= res2[ind_adv]).float()
+                        adv[ind_adv] = x1[ind_adv] * where_less.reshape([-1, *[1]*self.ndims]) + adv[ind_adv] * where_more.reshape([-1, *[1]*self.ndims])
+                        # Update residual
+                        res2[ind_adv] = t * where_less + res2[ind_adv] * where_more
+                        # Update x1
+                        x1[ind_adv] = im2[ind_adv] + (x1[ind_adv] - im2[ind_adv]) * self.beta
 
                     counter_iter += 1
 
@@ -423,16 +426,16 @@ class FABAttack():
                             print('restart {} - robust accuracy: {:.2%} at eps = {:.5f} - cum. time: {:.1f} s'.format(
                                 counter, acc.float().mean(), self.eps, time.time() - startt))
 
-            else:
+            else: # If targeted -> our interest
                 # Initialize best perturbation as inf
                 best_res = float('inf') * torch.ones_like(y)
                 for target_class in range(2, self.n_target_classes + 2):
                     self.target_class = target_class
                     for counter in range(self.n_restarts):
-                        ind_to_fool = acc.nonzero().squeeze()
-                        if len(ind_to_fool.shape) == 0: 
+                        # ind_to_fool = acc.nonzero().squeeze()
+                        if False: # len(ind_to_fool.shape) == 0: 
                             ind_to_fool = ind_to_fool.unsqueeze(0)
-                        if ind_to_fool.numel() != 0:
+                        if True: # ind_to_fool.numel() != 0: # Always enter here
                             x_to_fool = x.clone() # x[ind_to_fool].clone()
                             y_to_fool = y.clone() # y[ind_to_fool].clone()
                             adv_curr = self.attack_single_run(
@@ -462,7 +465,7 @@ class FABAttack():
                             temp_pred = self._predict_fn(adv_curr).max(1)[1]
                             acc_curr = temp_pred == y_to_fool
                             where_fool = ~acc_curr # Where the system is fooled
-                            where_better = res < best_res # Where pert is smaller
+                            where_better = res < best_res # Where smaller pert
                             # Update adversary where both things hapen
                             where_both = where_fool & where_better
                             adv[where_both] = adv_curr[where_both].clone()
