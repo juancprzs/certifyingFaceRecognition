@@ -11,6 +11,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mail-user=perezjc@kaust.edu.sa
 #SBATCH --mail-type=ALL
+#SBATCH --account conf-cvpr-2021.11.23-ghanembs
 
 source venv/bin/activate
 
