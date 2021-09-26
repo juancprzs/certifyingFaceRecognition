@@ -59,7 +59,7 @@ RED_ELLIPSE_MAT_INV = torch.linalg.inv(RED_ELLIPSE_MAT)
 
 def get_latent_codes(generator):
     lat_codes = generator.preprocess(np.load(LAT_CODES_PATH), **KWARGS)
-    return torch.from_numpy(lat_codes)[:80]
+    return torch.from_numpy(lat_codes)
 
 
 def get_pairwise_dists(embs1, embs2, method='insightface'):
@@ -256,7 +256,8 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
-        frs_method, transform, lin_comb, attack_type):
+        frs_method, transform, lin_comb, attack_type, iters=5, restarts=5, 
+        n_target_classes=5):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
     # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
     # functions and initializations at 0.
@@ -273,19 +274,19 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     adversary.seed = 42
     adversary.attacks_to_run = [attack_type]
     if attack_type == 'fab-t':
-        adversary.fab.n_restarts = 1 # 0 # Default is 5
-        adversary.fab.n_target_classes = 1 # 0 # Default is 9
-        adversary.fab.n_iter = 1 # 0 # Default is 100
+        adversary.fab.n_iter = iters # 0 # Default is 100
+        adversary.fab.n_restarts = restarts # 0 # Default is 5
+        adversary.fab.n_target_classes = n_target_classes # 0 # Default is 9
     elif attack_type == 'fab': # This is INTRACTABLE
-        adversary.fab.n_restarts = 1
-        adversary.fab.n_iter = 1
+        adversary.fab.n_iter = iters
+        adversary.fab.n_restarts = restarts
     elif attack_type in ['apgd-ce', 'apgd-dlr', 'apgd-t']:
         # adversary.apgd.n_restarts = 1 # 5
-        # adversary.apgd.n_iter = 100
+        # adversary.apgd.n_iter = iters
         x = 2
-        adversary.apgd_targeted.n_iter = 10
-        adversary.apgd_targeted.n_target_classes = 5
-        adversary.apgd_targeted.n_restarts = 5
+        adversary.apgd_targeted.n_iter = iters
+        adversary.apgd_targeted.n_restarts = restarts
+        adversary.apgd_targeted.n_target_classes = n_target_classes
 
     # Here we introduce the zeros, as we will be thinking in terms of deltas!
     deltas_orig = torch.zeros(labels.size(0), N_DIRS if lin_comb else EMB_SIZE)
@@ -487,7 +488,9 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
             curr_deltas, succ, mags = find_adversaries_autoattack(
                 generator, net, btch_cods.to(device), labels, embs, 
                 frs_method=args.face_recog_method, transform=transform, 
-                lin_comb=args.lin_comb, attack_type=args.attack_type
+                lin_comb=args.lin_comb, attack_type=args.attack_type, 
+                iters=args.iters, restarts=args.restarts, 
+                n_target_classes=args.n_target_classes
             )
         
         tot += batch_size

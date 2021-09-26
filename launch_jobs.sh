@@ -2,10 +2,10 @@
 #SBATCH -N 1
 #SBATCH --partition=batch
 #SBATCH --array=[0-24]
-#SBATCH -J sgd_xent_lr1e+2_m99
-#SBATCH -o logs/sgd_xent_lr1e+2_m99.%J.out
-#SBATCH -e logs/sgd_xent_lr1e+2_m99.%J.err
-#SBATCH --time=4:00:00
+#SBATCH -J adam_xent_it5_rest5_lr1e+2
+#SBATCH -o logs/adam_xent_it5_rest5_lr1e+2.%J.out
+#SBATCH -e logs/adam_xent_it5_rest5_lr1e+2.%J.err
+#SBATCH --time=1:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
@@ -15,13 +15,11 @@
 source venv/bin/activate
 
 python main_attack.py \
---chunks 25 \
---num-chunk ${SLURM_ARRAY_TASK_ID} \
---restarts 1 \
---load-embs \
---embs-file embs.pth \
---optim SGD \
---momentum 0.99 \
---output-dir sgd_xent_lr1e+2_m99 \
+--chunks 25 --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--load-embs --embs-file embs.pth \
+--attack-type manual \
+--loss xent \
+--restarts 5 \
+--iters 5 \
 --lr 1e+2 \
---loss xent
+--output-dir adam_xent_it5_rest5_lr1e+2

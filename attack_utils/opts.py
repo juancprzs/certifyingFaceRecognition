@@ -17,14 +17,16 @@ def parse_args():
                         help='Loss to optimize')
     parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
                         help='Optimizer to use')
-    parser.add_argument('--iters', type=int, default=100, 
-                        help='Optimization iterations per instance')
-    parser.add_argument('--lin-comb', action='store_true', default=False,
+    parser.add_argument('--no-lin-comb', action='store_true', default=False,
 		                help='Compute adv in terms of lin. comb. of directions')
-    parser.add_argument('--restarts', type=int, default=5, 
-                        help='num of chunks in which to break the dataset')
     parser.add_argument('--attack-type', type=str, default='manual', 
                         choices=ATTACKS, help='Attack to perform')
+    parser.add_argument('--iters', type=int, default=100, 
+                        help='Optimization iterations per instance')
+    parser.add_argument('--restarts', type=int, default=5, 
+                        help='num of chunks in which to break the dataset')
+    parser.add_argument('--n-target-classes', type=int, default=5, 
+                        help='num of classes for targetted attacks')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')
@@ -53,6 +55,7 @@ def parse_args():
     args = parser.parse_args()
 
     args.output_dir = osp.join('exp_results', args.output_dir)
+    args.lin_comb = not args.no_lin_comb
 
     # Log path: verify existence of output_dir dir, or create it
     if not osp.exists(args.output_dir):
