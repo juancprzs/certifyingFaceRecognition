@@ -2,9 +2,9 @@
 #SBATCH -N 1
 #SBATCH --partition=batch
 #SBATCH --array=[0-249]
-#SBATCH -J fabt_it5_rest5
-#SBATCH -o logs/fabt_it5_rest5.%J.out
-#SBATCH -e logs/fabt_it5_rest5.%J.err
+#SBATCH -J fabt_it5_rest5_targ5
+#SBATCH -o logs/fabt_it5_rest5_targ5.%J.out
+#SBATCH -e logs/fabt_it5_rest5_targ5.%J.err
 #SBATCH --time=1:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
@@ -22,4 +22,4 @@ python main_attack.py \
 --restarts 5 \
 --iters 5 \
 --n-target-classes 5 \
---output-dir fabt_it5_rest5
+--output-dir fabt_it5_rest5_targ5
