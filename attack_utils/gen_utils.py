@@ -571,7 +571,7 @@ def plot_advs(orig_ims, orig_labels, adv_ims, adv_labels, confu, args, mags):
         plt.axis('off'); plt.title('Prediction')
 
         plt.tight_layout()
-        path = osp.join(args.figs_dir, f'ori_{ori_lab}_adv_{adv_lab}.png')
+        path = osp.join(args.figs_dir, f'ori_{ori_lab}_adv_{adv_lab}.jpg')
         plt.savefig(path, bbox_inches='tight', dpi=400)
         plt.close()
     
