@@ -27,6 +27,9 @@ def parse_args():
                         help='num of chunks in which to break the dataset')
     parser.add_argument('--n-target-classes', type=int, default=5, 
                         help='num of classes for targetted attacks')
+    # Attribute manipulation
+    parser.add_argument('--attrs2drop', nargs='+', default=[],
+                        help='List of attributes to NOT consider for attacks')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')

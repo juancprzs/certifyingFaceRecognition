@@ -17,8 +17,8 @@ ATTRS = OrderedDict()
 ATTRS['age'] = 0.5
 ATTRS['eyeglasses'] = 0.5
 ATTRS['gender'] = 0.2
-ATTRS['pose'] =   0.5
-ATTRS['smile'] =  0.8
+ATTRS['pose'] = 0.5
+ATTRS['smile'] = 0.8
 
 # For deterministic behavior
 import torch.backends.cudnn as cudnn
@@ -472,8 +472,8 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
             "Must provide 'dirs' if want to check projection"
         if to_subs:
             # Check for subspace
-            assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat), \
-                'Projection matrix to subspace is wrong'
+            assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat, 
+                atol=5e-4), 'Projection matrix to subspace is wrong'
             assert in_subs(proj_ell, proj_mat), 'Points inside ellipse should '\
                 'also be on the subspace'
         # Check for ellipse
@@ -559,13 +559,23 @@ def plot_inner_prods(dirs):
     plt.show()
 
 
-def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0]):
+def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
+        attrs2drop=[]):
     plot_mat = False
     file_template = osp.join(BOUNDARIES_DIR, 
                              f'{gan_name}_{dataset}_%s_w_boundary.npy')
 
     all_bounds = glob(osp.join(BOUNDARIES_DIR, '*.npy'))
 
+    # Drop the unwanted attributes
+    if len(attrs2drop) != 0:
+        for attr in attrs2drop:
+            assert attr in ATTRS.keys(), f'Attribute {attr} is NOT valid'
+            ATTRS.pop(attr)
+
+        print(f'Dropped {len(attrs2drop)} attributes -> {len(ATTRS)} remaining')
+
+    # Load the directions
     dirs, files = [], []
     for att_name, magn in ATTRS.items():
         this_file = file_template % att_name
