@@ -4,6 +4,7 @@ import os.path as osp
 from utils.logger import setup_logger
 from .gen_utils import (args2text, print_training_params, LOSS_TYPES, OPTIMS, 
     FRS_METHODS)
+from attack_utils.proj_utils import ATTRS
 
 ATTACKS = ['fab-t', 'fab', 'apgd-ce', 'apgd-dlr', 'apgd-t', 'manual']
 
@@ -28,7 +29,8 @@ def parse_args():
     parser.add_argument('--n-target-classes', type=int, default=5, 
                         help='num of classes for targetted attacks')
     # Attribute manipulation
-    parser.add_argument('--attrs2drop', nargs='+', default=[],
+    parser.add_argument('--attrs2drop', nargs='+', default=[], 
+                        choices=ATTRS.keys(),
                         help='List of attributes to NOT consider for attacks')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
