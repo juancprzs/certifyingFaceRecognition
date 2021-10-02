@@ -103,7 +103,7 @@ def main():
         for image in val:
           # Save tensor
           save_path_tens = os.path.join(tens_out_dir, f'{pbar.n:06d}.pth')
-          torch.save(image.detach().cpu(), save_path_tens)
+          # torch.save(image.detach().cpu(), save_path_tens)
           # And the image as PNG
           save_path_png = os.path.join(ims_out_dir, f'{pbar.n:06d}.png')
           curr_image = 255. * image.cpu().detach().numpy().transpose(1, 2, 0)

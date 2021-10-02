@@ -232,9 +232,9 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
-        frs_method, transform, lin_comb, attack_type, dirs, red_dirs, 
-        red_ellipse_mat, ellipse_mat, proj_mat, iters=5, restarts=5, 
-        n_target_classes=5):
+        frs_method, transform, lin_comb, attack_type, dirs, red_dirs, dirs_inv,
+        red_ellipse_mat, ellipse_mat, ellipse_mat_inv, red_ellipse_mat_inv, 
+        proj_mat, iters=5, restarts=5, n_target_classes=5):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
     # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
     # functions and initializations at 0.
@@ -246,8 +246,13 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
             frs_method)[1] # The logits
     
     # `eps` is set inside AutoAttack (the passed param should be inocuous)
-    adversary = AutoAttack(forward_pass, norm='Lsigma2', eps=None, 
-        lin_comb=lin_comb)
+    adversary = AutoAttack(
+        forward_pass, norm='Lsigma2', eps=None, lin_comb=lin_comb, 
+        ellipse_mat=ellipse_mat, red_ellipse_mat=red_ellipse_mat, 
+        ellipse_mat_inv=ellipse_mat_inv, 
+        red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat, dirs=dirs,
+        dirs_inv=dirs_inv
+    )
     adversary.seed = 42
     adversary.attacks_to_run = [attack_type]
     if attack_type == 'fab-t':
@@ -507,8 +512,10 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 frs_method=args.face_recog_method, transform=transform, 
                 lin_comb=args.lin_comb, attack_type=args.attack_type, dirs=dirs,
                 red_dirs=red_dirs, red_ellipse_mat=red_ellipse_mat, 
-                ellipse_mat=ellipse_mat, proj_mat=proj_mat, iters=args.iters, 
-                restarts=args.restarts, n_target_classes=args.n_target_classes
+                ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv,
+                red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat, 
+                iters=args.iters, restarts=args.restarts, 
+                n_target_classes=args.n_target_classes, dirs_inv=dirs_inv
             )
         
         tot += batch_size
