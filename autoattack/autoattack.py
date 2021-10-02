@@ -13,7 +13,10 @@ from attack_utils.proj_utils import sq_distance
 class AutoAttack():
     def __init__(self, model, norm='Linf', eps=.3, seed=None, verbose=True,
                  attacks_to_run=[], version='standard', is_tf_model=False,
-                 device='cuda', log_path=None, lin_comb=False):
+                 device='cuda', log_path=None, lin_comb=False, ellipse_mat=None, 
+                 red_ellipse_mat=None, ellipse_mat_inv=None, 
+                 red_ellipse_mat_inv=None, proj_mat=None, dirs=None, 
+                 dirs_inv=None):
         self.model = model
         self.norm = norm
         assert norm in ['Linf', 'L2', 'L1', 'Lsigma2']
@@ -33,14 +36,21 @@ class AutoAttack():
                 self.model, n_restarts=5, n_iter=100, verbose=False, 
                 eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
                 seed=self.seed, device=self.device, logger=self.logger, 
-                lin_comb=self.lin_comb
+                lin_comb=self.lin_comb, ellipse_mat=ellipse_mat, 
+                red_ellipse_mat=red_ellipse_mat,
+                ellipse_mat_inv=ellipse_mat_inv, 
+                red_ellipse_mat_inv=red_ellipse_mat_inv
             )
             
             from .fab_pt import FABAttack_PT
             self.fab = FABAttack_PT(
                 self.model, n_restarts=5, n_iter=100, eps=self.epsilon, 
                 seed=self.seed,norm=self.norm, verbose=False, 
-                device=self.device, lin_comb=self.lin_comb
+                device=self.device, lin_comb=self.lin_comb, 
+                ellipse_mat=ellipse_mat, red_ellipse_mat=red_ellipse_mat,
+                ellipse_mat_inv=ellipse_mat_inv, 
+                red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat,
+                dirs=dirs, dirs_inv=dirs_inv
             )
         
             from .square import SquareAttack
@@ -52,7 +62,10 @@ class AutoAttack():
                 self.model, n_restarts=1, n_iter=100, verbose=False, 
                 eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
                 seed=self.seed, device=self.device, logger=self.logger, 
-                lin_comb=self.lin_comb
+                lin_comb=self.lin_comb, ellipse_mat=ellipse_mat, 
+                red_ellipse_mat=red_ellipse_mat,
+                ellipse_mat_inv=ellipse_mat_inv, 
+                red_ellipse_mat_inv=red_ellipse_mat_inv
             )
     
         else:

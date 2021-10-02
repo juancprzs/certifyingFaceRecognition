@@ -48,7 +48,14 @@ class FABAttack_PT(FABAttack):
             targeted=False,
             device=None,
             n_target_classes=9,
-            lin_comb=False):
+            lin_comb=False,
+            ellipse_mat=None, 
+            red_ellipse_mat=None,
+            ellipse_mat_inv=None, 
+            red_ellipse_mat_inv=None,
+            proj_mat=None,
+            dirs=None,
+            dirs_inv=None):
         """ FAB-attack implementation in pytorch """
 
         self.predict = predict
@@ -65,7 +72,14 @@ class FABAttack_PT(FABAttack):
                          targeted,
                          device,
                          n_target_classes,
-                         lin_comb)
+                         lin_comb,
+                         ellipse_mat,
+                         red_ellipse_mat,
+                         ellipse_mat_inv,
+                         red_ellipse_mat_inv,
+                         proj_mat,
+                         dirs,
+                         dirs_inv)
 
     def _predict_fn(self, x):
         return self.predict(x)

@@ -142,7 +142,7 @@ def projection_lsigma2(points_to_project, w_hyperplane, b_hyperplane,
     new_direction = new_direction.squeeze(2)
     
     projs = t - new_direction * lambd.unsqueeze(1)
-    if torch.any(torch.isnan(projs.sum())): import pdb; pdb.set_trace()
+    # if torch.any(torch.isnan(projs.sum())): import pdb; pdb.set_trace()
     return projs
 
 

@@ -17,8 +17,7 @@ from autoattack.checks import check_zero_gradients
 
 # Modified by us
 from attack_utils.proj_utils import sq_distance
-from attack_utils.gen_utils import (init_deltas, ELLIPSE_MAT, RED_ELLIPSE_MAT,
-    ELLIPSE_MAT_INV, RED_ELLIPSE_MAT_INV)
+from attack_utils.gen_utils import init_deltas
 
 
 def L1_projection(x2, y2, eps1):
@@ -124,7 +123,11 @@ class APGDAttack():
             use_largereps=False,
             is_tf_model=False,
             logger=None,
-            lin_comb=False):
+            lin_comb=False,
+            ellipse_mat=None, 
+            red_ellipse_mat=None,
+            ellipse_mat_inv=None, 
+            red_ellipse_mat_inv=None):
         """
         AutoPGD implementation in PyTorch
         """
@@ -152,8 +155,8 @@ class APGDAttack():
         self.y_target = None
         self.logger = logger
         self.lin_comb = lin_comb
-        self.mat = RED_ELLIPSE_MAT if self.lin_comb else ELLIPSE_MAT
-        self.mat_inv = RED_ELLIPSE_MAT_INV if self.lin_comb else ELLIPSE_MAT_INV
+        self.mat = red_ellipse_mat if self.lin_comb else ellipse_mat
+        self.mat_inv = red_ellipse_mat_inv if self.lin_comb else ellipse_mat_inv
     
     def init_hyperparam(self, x):
         assert self.norm in ['Linf', 'L2', 'L1', 'Lsigma2']
@@ -650,7 +653,11 @@ class APGDAttack_targeted(APGDAttack):
             use_largereps=False,
             is_tf_model=False,
             logger=None,
-            lin_comb=False):
+            lin_comb=False,
+            ellipse_mat=None, 
+            red_ellipse_mat=None,
+            ellipse_mat_inv=None, 
+            red_ellipse_mat_inv=None):
         """
         AutoPGD on the targeted DLR loss
         """
@@ -658,7 +665,9 @@ class APGDAttack_targeted(APGDAttack):
             n_restarts=n_restarts, eps=eps, seed=seed, loss='dlr-targeted',
             eot_iter=eot_iter, rho=rho, topk=topk, verbose=verbose, device=device,
             use_largereps=use_largereps, is_tf_model=is_tf_model, logger=logger,
-            lin_comb=lin_comb)
+            lin_comb=lin_comb, ellipse_mat=ellipse_mat,
+            red_ellipse_mat=red_ellipse_mat, ellipse_mat_inv=ellipse_mat_inv, 
+            red_ellipse_mat_inv=red_ellipse_mat_inv)
 
         self.y_target = None
         self.n_target_classes = n_target_classes

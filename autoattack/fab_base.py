@@ -21,8 +21,7 @@ DEFAULT_EPS_DICT_BY_NORM = {'Linf': .3, 'L2': 1., 'L1': 5.0, 'Lsigma2': None}
 
 # Modified by us
 from attack_utils.proj_utils import sq_distance
-from attack_utils.gen_utils import (init_deltas, ELLIPSE_MAT, RED_ELLIPSE_MAT,
-    ELLIPSE_MAT_INV, RED_ELLIPSE_MAT_INV)
+from attack_utils.gen_utils import init_deltas
 
 class FABAttack():
     """
@@ -53,7 +52,14 @@ class FABAttack():
             targeted=False,
             device=None,
             n_target_classes=9,
-            lin_comb=False):
+            lin_comb=False,
+            ellipse_mat=None, 
+            red_ellipse_mat=None,
+            ellipse_mat_inv=None, 
+            red_ellipse_mat_inv=None,
+            proj_mat=None,
+            dirs=None,
+            dirs_inv=None):
         """ FAB-attack implementation in pytorch """
 
         self.norm = norm
@@ -70,8 +76,12 @@ class FABAttack():
         self.device = device
         self.n_target_classes = n_target_classes
         self.lin_comb = lin_comb
-        self.mat = RED_ELLIPSE_MAT if self.lin_comb else ELLIPSE_MAT
-        self.mat_inv = RED_ELLIPSE_MAT_INV if self.lin_comb else ELLIPSE_MAT_INV
+        self.mat = red_ellipse_mat if self.lin_comb else ellipse_mat
+        self.mat_inv = red_ellipse_mat_inv if self.lin_comb else ellipse_mat_inv
+        self.ellipse_mat = ellipse_mat
+        self.proj_mat = proj_mat
+        self.dirs = dirs
+        self.dirs_inv = dirs_inv
 
     def check_shape(self, x):
         return x if len(x.shape) > 0 else x.unsqueeze(0)
@@ -178,7 +188,9 @@ class FABAttack():
                     # Sample some random noise (hardcoded on_surface)
                     deltas = init_deltas(
                         random_init=True, lin_comb=self.lin_comb, 
-                        n_vecs=x.size(0), on_surface=True
+                        n_vecs=x.size(0), on_surface=True,
+                        ellipse_mat=self.ellipse_mat, proj_mat=self.proj_mat,
+                        dirs=self.dirs, dirs_inv=self.dirs_inv
                     )
                     # Add the step
                     x1 = im2 + deltas.unsqueeze(2).unsqueeze(3)
@@ -309,7 +321,13 @@ class FABAttack():
 
                     d1_step = (x1 + self.eta * d1)
                     d2_step = (im2 + self.eta * d2)
-                    x1 = d1_step * (1 - alpha) + d2_step * alpha
+
+                    temp_x1 = d1_step * (1 - alpha) + d2_step * alpha
+                    where_nan = torch.isnan(temp_x1.sum((1,2,3)))
+                    if torch.all(where_nan):
+                        break
+                    
+                    x1[~where_nan] = temp_x1[~where_nan]
                     # This clamping assumes we're dealing with images!
                     # x1 = x1.clamp(0.0, 1.0)
 
