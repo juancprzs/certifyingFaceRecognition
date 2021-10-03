@@ -24,7 +24,7 @@ DEVICE = torch.device('cuda')
 OPTIMS = ['Adam', 'SGD']
 FRS_METHODS = ['insightface', 'facenet']
 KWARGS = { 'latent_space_type' : LAT_SPACE }
-LOSS_TYPES = ['away', 'nearest', 'diff', 'xent']
+LOSS_TYPES = ['away', 'nearest', 'diff', 'xent', 'dlr']
 ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
 ORIG_IMAGES_PATH = osp.join(ORIG_DATA_PATH, 'ims')
 ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
@@ -160,9 +160,9 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
     value = -1 if use_probs else float('inf')
     mod_vals = torch.scatter(vals, 1, labels.view(-1, 1), value)
     if use_probs: # If they're probabilities, we are looking for the max
-        nearest_val, _ = torch.max(mod_vals, 1)
+        nearest_val, _ = torch.max(mod_vals, 1), keepdim=True)
     else: # If they're distances, we are looking for the min
-        nearest_val, _ = torch.min(mod_vals, 1)
+        nearest_val, _ = torch.min(mod_vals, 1), keepdim=True)
 
     # -----------   The losses themselves
     # --> 'away' loss
@@ -182,6 +182,7 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
     # --> 'diff' loss
     if loss_type == 'diff':
         diff = target_val - nearest_val
+        import pdb; pdb.set_trace()
         if use_probs: # If it's a probability, we want to MINIMIZE it
             coeff = +1.
         else: # Otherwise we want to MAXIMIZE it
@@ -198,6 +199,18 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
             reduction='none')
         # It's the cross-entropy loss, so we want to maximize it
         return -1. * xent.mean()
+    # --> 'dlr' loss (difference-of-logits ratio)
+    if loss_type == 'dlr':
+        assert not use_probs, 'dlr loss works in terms of logits'
+        # The numerator
+        diff1 = target_val - nearest_val
+        # The denominator
+        logits = -all_dists
+        topk = torch.topk(logits, k=3, dim=1, largest=True, sorted=True)[0]
+        diff2 = topk[:, 0] - topk[:, 2] # The first minus the third
+        ratio = diff1 / diff2.unsqueeze(1)
+        coeff = -1.
+        return coeff * ratio.mean()
 
 
 def init_deltas(random_init, lin_comb, n_vecs, on_surface, ellipse_mat, 
@@ -340,7 +353,8 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
             success = preds != labels
             if torch.all(success): break
             # Compute loss
-            loss = compute_loss(all_dists, labels, loss_type=loss_type)
+            loss = compute_loss(all_dists, labels, loss_type=loss_type,
+                use_probs=loss_type!='dlr')
             # Backward
             optim.zero_grad()
             loss.backward()
