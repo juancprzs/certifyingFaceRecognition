@@ -160,9 +160,9 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
     value = -1 if use_probs else float('inf')
     mod_vals = torch.scatter(vals, 1, labels.view(-1, 1), value)
     if use_probs: # If they're probabilities, we are looking for the max
-        nearest_val, _ = torch.max(mod_vals, 1), keepdim=True)
+        nearest_val, _ = torch.max(mod_vals, 1, keepdim=True)
     else: # If they're distances, we are looking for the min
-        nearest_val, _ = torch.min(mod_vals, 1), keepdim=True)
+        nearest_val, _ = torch.min(mod_vals, 1, keepdim=True)
 
     # -----------   The losses themselves
     # --> 'away' loss
