@@ -182,7 +182,6 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
     # --> 'diff' loss
     if loss_type == 'diff':
         diff = target_val - nearest_val
-        import pdb; pdb.set_trace()
         if use_probs: # If it's a probability, we want to MINIMIZE it
             coeff = +1.
         else: # Otherwise we want to MAXIMIZE it
