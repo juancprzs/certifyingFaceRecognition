@@ -11,10 +11,10 @@ ATTACKS = ['fab-t', 'fab', 'apgd-ce', 'apgd-dlr', 'apgd-t', 'manual']
 def parse_args():
     parser = argparse.ArgumentParser(description='Compute semantic adversaries')
     # Optimization parameters
-    parser.add_argument('--lr', type=float, default=1e-2, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-0, help='Learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, 
                         help='Momentum for SGD')
-    parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
+    parser.add_argument('--loss', type=str, default='diff', choices=LOSS_TYPES,
                         help='Loss to optimize')
     parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
                         help='Optimizer to use')
@@ -22,9 +22,9 @@ def parse_args():
 		                help='Compute adv in terms of lin. comb. of directions')
     parser.add_argument('--attack-type', type=str, default='manual', 
                         choices=ATTACKS, help='Attack to perform')
-    parser.add_argument('--iters', type=int, default=100, 
+    parser.add_argument('--iters', type=int, default=50,
                         help='Optimization iterations per instance')
-    parser.add_argument('--restarts', type=int, default=5, 
+    parser.add_argument('--restarts', type=int, default=100, 
                         help='num of chunks in which to break the dataset')
     parser.add_argument('--n-target-classes', type=int, default=5, 
                         help='num of classes for targetted attacks')
