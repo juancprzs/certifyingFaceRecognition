@@ -212,22 +212,15 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return coeff * ratio.mean()
 
 
-def init_deltas(random_init, lin_comb, n_vecs, on_surface, ellipse_mat, 
-        proj_mat, dirs, dirs_inv):
+def init_deltas(random_init, n_vecs, on_surface, ellipse_mat, dirs, dirs_inv):
     if random_init:
         # Sample from ellipsoid and project
         deltas = sample_ellipsoid(ellipse_mat, n_vecs=n_vecs)
-        deltas, _ = proj2region(deltas, proj_mat, ellipse_mat, check=True, 
-            dirs=dirs, on_surface=on_surface)
-        if lin_comb: # Express the computed delta as a lin comb of our dirs
-            # The current deltas is of shape [batch_size, lat_space]
-            deltas = (dirs_inv @ deltas.T).T
+        deltas, _ = proj2region(deltas, proj_mat=None, ellipse_mat=ellipse_mat, 
+            check=True, dirs=dirs, on_surface=on_surface, to_subs=False)
+        deltas = (dirs_inv @ deltas.T).T
     else:
-        if lin_comb:
-            n_dirs = dirs.size(1)
-            deltas = torch.zeros(n_vecs, n_dirs, device=DEVICE)
-        else:
-            deltas = torch.zeros(n_vecs, EMB_SIZE)
+        deltas = torch.zeros(n_vecs, EMB_SIZE)
 
     return deltas.clone().detach()
 
@@ -334,8 +327,9 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
     success = torch.zeros_like(labels, dtype=bool) # Not successful anywhere
     for idx_rest in range(restarts):
         # (Re-)Initialize deltas that haven't been successful
-        inits = init_deltas(random_init, lin_comb, lat_codes.size(0), 
-            rand_init_on_surf, ellipse_mat, proj_mat, dirs, dirs_inv)
+        ell_mat = red_ellipse_mat if lin_comb else ellipse_mat
+        inits = init_deltas(random_init, lat_codes.size(0), rand_init_on_surf, 
+            ell_mat, dirs, dirs_inv)
         with torch.no_grad():
             deltas[~success] = inits[~success]
         
@@ -477,6 +471,7 @@ def get_all_matrices(attrs2drop=[]):
     red_ellipse_mat_inv = torch.linalg.inv(red_ellipse_mat)
     return (proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, 
         red_ellipse_mat, red_ellipse_mat_inv, red_dirs, red_dirs_inv)
+
 
 def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
         args):
