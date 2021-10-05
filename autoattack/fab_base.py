@@ -190,7 +190,7 @@ class FABAttack():
                         random_init=True, lin_comb=self.lin_comb, 
                         n_vecs=x.size(0), on_surface=True,
                         ellipse_mat=self.ellipse_mat, proj_mat=self.proj_mat,
-                        dirs=self.dirs, dirs_inv=self.dirs_inv
+                        dirs=self.dirs
                     )
                     # Add the step
                     x1 = im2 + deltas.unsqueeze(2).unsqueeze(3)
