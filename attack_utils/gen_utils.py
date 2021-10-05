@@ -212,13 +212,12 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return coeff * ratio.mean()
 
 
-def init_deltas(random_init, n_vecs, on_surface, ellipse_mat, dirs, dirs_inv):
+def init_deltas(random_init, n_vecs, on_surface, ellipse_mat, dirs):
     if random_init:
         # Sample from ellipsoid and project
         deltas = sample_ellipsoid(ellipse_mat, n_vecs=n_vecs)
         deltas, _ = proj2region(deltas, proj_mat=None, ellipse_mat=ellipse_mat, 
             check=True, dirs=dirs, on_surface=on_surface, to_subs=False)
-        deltas = (dirs_inv @ deltas.T).T
     else:
         deltas = torch.zeros(n_vecs, EMB_SIZE)
 
@@ -329,7 +328,7 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
         # (Re-)Initialize deltas that haven't been successful
         ell_mat = red_ellipse_mat if lin_comb else ellipse_mat
         inits = init_deltas(random_init, lat_codes.size(0), rand_init_on_surf, 
-            ell_mat, dirs, dirs_inv)
+            ell_mat, dirs)
         with torch.no_grad():
             deltas[~success] = inits[~success]
         
