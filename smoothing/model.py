@@ -1,20 +1,40 @@
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.transforms import Compose, Normalize
+from models.mod_stylegan_generator import ModStyleGANGenerator
+from attack_utils.gen_utils import (get_transform, lat2embs,
+     get_latent_codes,  INP_RESOLS, MEAN, STD, DEVICE, EMB_SIZE)
+from main_attack import get_net, get_transform
+
 
 class wraped_model(nn.Module):
-    def __init__(self, generator, face_reco, projection_matrix) -> None:
+    def __init__(self, direction_matrix, face_recog='insightface') -> None:
         super().__init__()
+        # args.LOGGER.info(f'Initializing generator.')
+        Generator = ModStyleGANGenerator('stylegan_ffhq')
+        Generator.model.eval().to(DEVICE)
+        self.generator = Generator.easy_synthesize
 
-        self.generator = generator.easy_synthesize
-        self.face_reco = face_reco
-        self.transform = get_transform()
-        self.proj_mat = projection_matrix
+        self.face_reco = get_net(face_recog).to(DEVICE)
+
+        self.transform = get_transform(INP_RESOLS[face_recog], MEAN, STD)
+
+        self.proj_matrix = direction_matrix
+
+        latents = get_latent_codes(Generator).to(DEVICE)
+
+        #Computing original embeddings
+        print("Computing original embeddings.")
+        self.original_embeddings = lat2embs(Generator, self.face_reco, latents,
+                self.transform, few=False, with_tqdm=True, return_ims=False)
 
     def compute_probs(self, embedding):
         #Compute the probability based on distances.
-        return
+        all_dists = torch.cdist(embedding, self.original_embeddings, 
+                                compute_mode='donot_use_mm_for_euclid_dist')
+        all_dists = all_dists / np.sqrt(EMB_SIZE)
+        return F.softmax(-all_dists, dim=1)
 
     def forward(self, x, p=0):
         # Adding perturbations to the latent
@@ -27,17 +47,3 @@ class wraped_model(nn.Module):
         x = self.face_reco(x)
         # Get probability vector
         return  self.compute_probs(x)
-
-
-
-
-def get_transform():
-    def resize(x):
-        x = x.unsqueeze(0) if x.ndim != 4 else x
-        interp = F.interpolate(x, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', 
-            align_corners=False)
-        return interp.squeeze(0)
-
-    normalize = Normalize((MEAN, MEAN, MEAN), (STD, STD, STD))
-    return Compose([resize, normalize])
-# Transforms
