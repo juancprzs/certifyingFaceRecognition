@@ -11,20 +11,25 @@ from main_attack import get_net, get_transform
 class wraped_model(nn.Module):
     def __init__(self, direction_matrix, face_recog='insightface') -> None:
         super().__init__()
-        # args.LOGGER.info(f'Initializing generator.')
+        
+        # Loading the GAN
         Generator = ModStyleGANGenerator('stylegan_ffhq')
         Generator.model.eval().to(DEVICE)
         self.generator = Generator.easy_synthesize
 
+        # Loading the face recognition guy
         self.face_reco = get_net(face_recog).to(DEVICE)
 
+        # Needed transformations for the generated images.
         self.transform = get_transform(INP_RESOLS[face_recog], MEAN, STD)
 
+        # The matrix for semantic directions
         self.proj_matrix = direction_matrix
 
+        # Getting the latents for our identities.
         latents = get_latent_codes(Generator).to(DEVICE)
 
-        #Computing original embeddings
+        # Computing original embeddings for these identities.
         print("Computing original embeddings.")
         self.original_embeddings = lat2embs(Generator, self.face_reco, latents,
                 self.transform, few=False, with_tqdm=True, return_ims=False)
