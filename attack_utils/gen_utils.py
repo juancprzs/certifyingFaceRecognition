@@ -212,7 +212,8 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
         return coeff * ratio.mean()
 
 
-def init_deltas(random_init, n_vecs, on_surface, ellipse_mat, dirs):
+def init_deltas(random_init, lin_comb, n_vecs, on_surface, ellipse_mat, 
+        proj_mat, dirs, dirs_inv):
     if random_init:
         # Sample from ellipsoid and project
         deltas = sample_ellipsoid(ellipse_mat, n_vecs=n_vecs)
