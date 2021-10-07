@@ -195,6 +195,82 @@ def proj_ellipse_pytorch(y, A, mu=None, c=1):
     return result, t, sq_dist <= 1
 
 
+def proj_ellipse_pytorch_diag(y, vec_A, mu=None, c=1):
+    """ 
+        vec_A: vector modeling the DIAGONAL matrix that defined the ellipse
+            -- ellipse: X.T @ A @ X = 1
+        mu : mean vector
+        c: level set
+        y: vector to be projected
+
+        Example:
+        points = np.random.uniform(low=-2, high=2, size=(SAMPLES, 2, 1)) + mu
+        projs, _, _ = proj_ellipse(y, A)
+    """
+    def solve(vec_A, shifted):
+        def fun(t, vec):
+            # Equivalent to B = (I + t*A)^(-1)
+            inv = 1 / (1 + t*vec_A)
+            # Equivalent to C = B @ A @ B
+            prod = vec_A * inv**2
+            # Equivalent to vec.T @ C @ vec (but without summing)
+            inter = prod * vec.squeeze()**2
+            return inter.sum() - 1
+        
+        bracket = [np.finfo(float).eps, 1e3]
+        sols, which_out = [], []
+        for idx in range(shifted.shape[0]):
+            f = lambda t: fun(t, shifted[idx].reshape(1, -1, 1))
+            eval1, eval2 = f(bracket[0]).item(), f(bracket[1]).item()
+            if eval1 * eval2 < 0: # Opposing signs
+                solution = root_scalar(f, method='bisect', bracket=bracket)
+                sols.append(solution.root)
+                which_out.append(True)
+            else:
+                which_out.append(False)
+        
+        return (torch.tensor(sols, device=y.device).reshape(-1, 1), 
+            torch.tensor(which_out, device=y.device))
+
+    if mu is None:
+        mu = torch.zeros((y.shape[0], 1), device=y.device)
+    # Assertions
+    assert len(mu.shape) == 2 and mu.shape[1] == 1, 'mu must be column vector'
+    assert y.shape[-2] == mu.shape[-2], \
+        'y should be a stack of vectors of the same dim as mu'
+
+    # Reshapes
+    mu = mu.reshape(1, -1, 1) # Add batch dim
+    if len(y.shape) == 2: # Conditionally add batch dim
+        n_dims, n_vecs = y.shape
+        y = y.T.reshape(n_vecs, n_dims, 1)
+    
+    # Scale matrix and shift vector
+    sc_vec_A = vec_A / c
+    shifted = y - mu
+
+    # Find scalar t's
+    t, which_out = solve(sc_vec_A, shifted)
+    extracted = shifted[which_out]
+
+    # Solve system with the t's that were found
+    # System can be solved efficiently by inverting because the matrix is diag
+    mat = 1 + t * sc_vec_A.unsqueeze(0)
+    inv = 1 / mat
+    projections = inv.unsqueeze(2) * extracted
+    shifted[which_out] = projections
+
+    # Compute new distances
+    sq_dist = sq_distance(torch.diag(sc_vec_A), shifted)
+    result = shifted + mu
+    if result.shape[0] == 1: # Has batch dim == 1
+        result = torch.squeeze(result, dim=0)
+    else: # Has batch dim > 1
+        result = torch.squeeze(result, dim=2).T
+    
+    return result, t, sq_dist <= 1
+
+
 def set_axes_equal(ax):
     '''Make axes of 3D plot have equal scale so that spheres appear as spheres,
     cubes as cubes, etc..  This is one possible solution to Matplotlib's
@@ -421,7 +497,7 @@ def in_ellps(v, ellipse_mat, atol=1e-4):
 
 
 def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
-        on_surface=False, max_iters=5):
+        on_surface=False, max_iters=5, diag_ellipse_mat=False):
     '''
     vs: vectors to project (d x n1)
     proj_mat: matrix to project vectors to subspace spanned by directions (cols 
@@ -429,17 +505,20 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
     ellipse_mat: matrix parameterizing the hyper-ellipsoid (d x d)
     check: boolean stating whether projections are to be checked
     dirs: matrix of vectors establishing directions of interest (d x n2)
+    diag_ellipse_mat: boolean stating if ellipse_mat is diagonal -> improve 
+        running time
     '''
+    ell_mat = torch.diag(ellipse_mat) if diag_ellipse_mat else ellipse_mat
     def proj2surf(v):
-        dists = sq_distance(ellipse_mat, v.T.unsqueeze(dim=2))
+        dists = sq_distance(ell_mat, v.T.unsqueeze(dim=2))
         sqrt_dists = torch.sqrt(dists.reshape(1, -1))
         return v / (sqrt_dists + 1e-4)
 
     def condition(proj):
         if to_subs:
-            return in_subs(proj, proj_mat) and in_ellps(proj, ellipse_mat)
+            return in_subs(proj, proj_mat) and in_ellps(proj, ell_mat)
         else:
-            return in_ellps(proj, ellipse_mat)
+            return in_ellps(proj, ell_mat)
     
     vs = vs.T
     # Project vector to subspace (as spanned by dirs)
@@ -447,9 +526,15 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
 
     # Projection ON the ellipse (if requested)
     if on_surface: proj_subs = proj2surf(proj_subs)
+
+    # Ellipse-projection function    
+    if diag_ellipse_mat: # Much more efficient
+        proj_ellipse_fun = proj_ellipse_pytorch_diag
+    else:
+        proj_ellipse_fun = proj_ellipse_pytorch
     
     # Projection INSIDE the ellipse
-    proj_ell, _, _ = proj_ellipse_pytorch(proj_subs, ellipse_mat)
+    proj_ell, _, _ = proj_ellipse_fun(proj_subs, ellipse_mat)
 
     # Iterate until max_iters if needed
     curr_iters = 0
@@ -457,27 +542,27 @@ def proj2region(vs, proj_mat, ellipse_mat, check=True, dirs=None, to_subs=True,
         if curr_iters == max_iters: break
         curr_iters += 1
         # The projection of query vector onto the ellipse
-        proj_ell, _, _ = proj_ellipse_pytorch(proj_ell, ellipse_mat)
+        proj_ell, _, _ = proj_ellipse_fun(proj_ell, ellipse_mat)
         # Project vector to subspace
         proj_ell = proj_mat @ proj_ell if to_subs else proj_ell
     
     # Final projection for vectors that are still a bit outside
     if not condition(proj_ell):
-        dists = sq_distance(ellipse_mat, proj_ell.T.unsqueeze(dim=2))
+        dists = sq_distance(ell_mat, proj_ell.T.unsqueeze(dim=2))
         whr_need = (torch.sqrt(dists.reshape(1, -1)) >= 1).squeeze()
         proj_ell[:, whr_need] = proj2surf(proj_ell)[:, whr_need]
 
     if check:
-        assert dirs is not None, \
-            "Must provide 'dirs' if want to check projection"
         if to_subs:
+            assert dirs is not None, "Must provide 'dirs' if want to check " \
+                "projection"
             # Check for subspace
             assert torch.allclose(dirs @ torch.linalg.pinv(dirs), proj_mat, 
                 atol=5e-4), 'Projection matrix to subspace is wrong'
             assert in_subs(proj_ell, proj_mat), 'Points inside ellipse should '\
                 'also be on the subspace'
         # Check for ellipse
-        assert in_ellps(proj_ell, ellipse_mat), 'Some points outside ellipsoid!'
+        assert in_ellps(proj_ell, ell_mat), 'Some points outside ellipsoid!'
     
     return proj_ell.T, proj_subs.T
 
@@ -576,13 +661,14 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
         print(f'Dropped {len(attrs2drop)} attributes -> {len(ATTRS)} remaining')
 
     # Load the directions
-    dirs, files = [], []
+    dirs, files, magns = [], [], []
     for att_name, magn in ATTRS.items():
         this_file = file_template % att_name
         assert this_file in all_bounds, \
             f'Boundary for attr "{att_name}" not found!'
         # Load vector and modify its magnitude
         this_dir = magn * np.load(this_file)
+        magns.append(magn)
         dirs.append(this_dir)
         files.append(this_file)
 
@@ -599,15 +685,21 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
     # We also compute a lower-dimensional version of the ellipse matrix. This 
     # matrix represents a hyper-ellipsoid that DOES NOT live in the original
     # high-dimensional space, but on a space of dimension equivalent to the 
-    # number of the direction of interest
-    red_dirs = transform_vecs(dirs) # Reduced directions
+    # number of the direction of interest. The semi-axes of this ellipsoid are
+    # aligned with the space canonical axis
+    magns = np.array(magns)
+    # Each magnitude is represented as axis-aligned vector
+    red_dirs = np.diag(magns)
     red_ellipse_mat = get_ellipse_mat(red_dirs)
+    assert np.all(red_ellipse_mat == np.diag(np.diagonal(red_ellipse_mat))), \
+        'Matrix should be diagonal'
+    red_ellipse_mat = np.diagonal(red_ellipse_mat)
 
     # Return:
     # (1) proj to subspace, (2) mat parameterizing ellipse, (3) directions, 
-    # (4) mat parameterizing reduced ellipse, (4) reduced directions, and 
-    # (5) files from which the directions came
-    return proj_mat, ellipse_mat, dirs, red_ellipse_mat, red_dirs, files
+    # (4) mat parameterizing reduced ellipse, and (5) files from which the 
+    # directions came
+    return proj_mat, ellipse_mat, dirs, red_ellipse_mat, files
 
 
 def get_ellipse_mat(dirs):

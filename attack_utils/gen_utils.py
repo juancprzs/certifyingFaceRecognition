@@ -6,7 +6,7 @@ import os.path as osp
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from autoattack import AutoAttack
-from torch.optim import SGD, Adam
+from torch.optim import SGD, Adam, RMSprop
 from torchvision.transforms import Compose, Normalize
 from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
     proj2region, in_subs, in_ellps, sq_distance)
@@ -21,7 +21,7 @@ DATASET = 'ffhq'
 IMAGE_EXT = 'png'
 GAN_NAME = 'stylegan'
 DEVICE = torch.device('cuda')
-OPTIMS = ['Adam', 'SGD']
+OPTIMS = ['Adam', 'SGD', 'RMSProp']
 FRS_METHODS = ['insightface', 'facenet']
 KWARGS = { 'latent_space_type' : LAT_SPACE }
 LOSS_TYPES = ['away', 'nearest', 'diff', 'xent', 'dlr']
@@ -80,6 +80,8 @@ def get_optim(deltas, optim_name='SGD', lr=0.001, momentum=0.9):
         optim = SGD([deltas], lr=lr, momentum=momentum)
     elif optim_name == 'Adam':
         optim = Adam([deltas], lr=lr)
+    elif optim_name == 'RMSProp':
+        optim = RMSprop([deltas], lr=lr)
 
     return optim
 
@@ -241,8 +243,8 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
         frs_method, transform, lin_comb, attack_type, dirs, red_dirs, dirs_inv,
-        red_ellipse_mat, ellipse_mat, ellipse_mat_inv, red_ellipse_mat_inv, 
-        proj_mat, iters=5, restarts=5, n_target_classes=5):
+        red_ellipse_mat, ellipse_mat, ellipse_mat_inv, proj_mat, iters=5, 
+        restarts=5, n_target_classes=5):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
     # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
     # functions and initializations at 0.
@@ -258,7 +260,7 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         forward_pass, norm='Lsigma2', eps=None, lin_comb=lin_comb, 
         ellipse_mat=ellipse_mat, red_ellipse_mat=red_ellipse_mat, 
         ellipse_mat_inv=ellipse_mat_inv, 
-        red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat, dirs=dirs,
+        red_ellipse_mat_inv=None, proj_mat=proj_mat, dirs=dirs,
         dirs_inv=dirs_inv
     )
     adversary.seed = 42
@@ -303,13 +305,13 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     return deltas.detach().cpu(), success, magnitudes
 
 
-def check_deltas(deltas, lin_comb, red_dirs, red_ellipse_mat, ellipse_mat, 
-        proj_mat, check=True):
+def check_deltas(deltas, lin_comb, red_ellipse_mat, ellipse_mat, proj_mat, 
+        check=True):
     if lin_comb:
-        pert = (red_dirs @ deltas.T).T
-        magnitudes = sq_distance(red_ellipse_mat, pert.unsqueeze(dim=2))
+        magnitudes = sq_distance(torch.diag(red_ellipse_mat), 
+            deltas.unsqueeze(dim=2))
         if check:
-            assert in_ellps(pert.T, red_ellipse_mat, atol=1e-3)
+            assert in_ellps(deltas.T, torch.diag(red_ellipse_mat), atol=1e-3)
     else:
         magnitudes = sq_distance(ellipse_mat, deltas.unsqueeze(dim=2))
         if check:
@@ -321,19 +323,16 @@ def check_deltas(deltas, lin_comb, red_dirs, red_ellipse_mat, ellipse_mat,
 
 def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name, 
         lr, iters, momentum, frs_method, loss_type, transform, ellipse_mat, 
-        proj_mat, dirs, dirs_inv, red_dirs, red_dirs_inv, red_ellipse_mat,
-        random_init=True, rand_init_on_surf=True, lin_comb=True, restarts=5):
-    # First deltas as garbage 
-    deltas = torch.ones(
-        lat_codes.size(0), dirs.size(1) if lin_comb else EMB_SIZE)
-    deltas = (float('nan') * deltas).to(DEVICE)
-    success = torch.zeros_like(labels, dtype=bool) # Not successful anywhere
+        proj_mat, dirs, dirs_inv, red_ellipse_mat, random_init=True, 
+        rand_init_on_surf=True, lin_comb=True, restarts=5):
+    # The best deltas (the ones to return at the end)
+    best_deltas = torch.zeros(
+        lat_codes.size(0), dirs.size(1) if lin_comb else EMB_SIZE).to(DEVICE)
+    best_deltas.requires_grad = False
     for idx_rest in range(restarts):
         # (Re-)Initialize deltas that haven't been successful
-        inits = init_deltas(random_init, lin_comb, lat_codes.size(0), 
+        deltas = init_deltas(random_init, lin_comb, lat_codes.size(0), 
             rand_init_on_surf, ellipse_mat, proj_mat, dirs, dirs_inv)
-        with torch.no_grad():
-            deltas[~success] = inits[~success]
         
         deltas = deltas.clone().detach().requires_grad_(True)
         # Their corresponding optimizer
@@ -346,37 +345,36 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
                 lat_codes+perturbation, transform, orig_embs, frs_method)
             preds = torch.argmin(all_dists, 1)
             success = preds != labels
+            best_deltas[success] = deltas[success].clone().detach()
             if torch.all(success): break
             # Compute loss
             loss = compute_loss(all_dists, labels, loss_type=loss_type,
                 use_probs=loss_type!='dlr')
-            # Backward
+            # Backward and optim step
             optim.zero_grad()
             loss.backward()
-            # Optim step without forgetting previous values
-            old_deltas = torch.clone(deltas).detach()
             optim.step()
             # Projection
             with torch.no_grad():
                 if lin_comb: # Project to low-dimensional ellipsoid
-                    # Compute where current deltas fall in our reduced space
-                    pert = (red_dirs @ deltas.T).T
                     # Project this point to inside the ellipse in this space
-                    proj, _ = proj2region(pert, proj_mat, red_ellipse_mat, 
-                        to_subs=False, check=True, dirs=dirs, on_surface=False)
-                    # Find the coefficients that produce this projection
-                    deltas = (red_dirs_inv @ proj.T).T
+                    projj, _ = proj2region(
+                        deltas, proj_mat=None, ellipse_mat=red_ellipse_mat, 
+                        to_subs=False, check=True, on_surface=False,
+                        diag_ellipse_mat=True
+                    )
+                    deltas[:] = projj[:]
                 else: # Project to high-dimensional ellipsoid
-                    deltas, _ = proj2region(deltas, proj_mat, ellipse_mat,
+                    deltas, _ = proj2region(best_deltas, proj_mat, ellipse_mat,
                         check=True, dirs=dirs, on_surface=False)
-                # Re-establish old values for deltas that were already succesful
-                deltas[success] = old_deltas[success]
-                deltas = deltas.clone().detach().requires_grad_(True)
 
     # Final check of deltas
-    magnitudes = check_deltas(deltas, lin_comb, red_dirs, red_ellipse_mat, 
-        ellipse_mat, proj_mat)
-    return deltas.detach().cpu(), success, magnitudes
+    try:
+        magnitudes = check_deltas(best_deltas, lin_comb, red_ellipse_mat, ellipse_mat, 
+            proj_mat)
+    except: 
+        import pdb; pdb.set_trace()
+    return best_deltas.detach().cpu(), success, magnitudes
 
 
 def check_advs(labels, curr_preds, successes, args):
@@ -451,9 +449,8 @@ def get_all_matrices(attrs2drop=[]):
     # (1) The projection-to-subspace matrix
     # (2) The matrix describing the hyperellipsoid
     # (3) The matrix of directions of our interest
-    # (4) The matrix describing the lower-dimensional hyperellipsoid
-    # (5) The matrix of reduced dirs of our interest (low dims -> square mat!)
-    proj_mat, ellipse_mat, dirs, red_ellipse_mat, red_dirs, _ = \
+    # (4) The diagonal matrix describing the lower-dimensional hyperellipsoid
+    proj_mat, ellipse_mat, dirs, red_ellipse_mat, _ = \
         get_projection_matrices(dataset=DATASET, gan_name=GAN_NAME, 
             attrs2drop=attrs2drop)
 
@@ -463,23 +460,19 @@ def get_all_matrices(attrs2drop=[]):
     assert proj_mat.size(0) == proj_mat.size(1) == EMB_SIZE
     assert ellipse_mat.size(0) == ellipse_mat.size(1) == EMB_SIZE
 
-    red_dirs = torch.tensor(red_dirs, dtype=torch.float32, device=DEVICE)
     red_ellipse_mat = torch.tensor(red_ellipse_mat, dtype=torch.float32, 
         device=DEVICE)
-    assert red_ellipse_mat.size(0) == red_ellipse_mat.size(1) == dirs.size(1)
+    assert red_ellipse_mat.size(0) == dirs.size(1)
     dirs_inv = torch.linalg.pinv(dirs)
-    red_dirs_inv = torch.linalg.inv(red_dirs)
     ellipse_mat_inv = torch.linalg.inv(ellipse_mat)
-    red_ellipse_mat_inv = torch.linalg.inv(red_ellipse_mat)
     return (proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, 
-        red_ellipse_mat, red_ellipse_mat_inv, red_dirs, red_dirs_inv)
+        red_ellipse_mat)
 
 
 def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
         args):
     proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, red_ellipse_mat, \
-        red_ellipse_mat_inv, red_dirs, red_dirs_inv = \
-            get_all_matrices(args.attrs2drop)
+        = get_all_matrices(args.attrs2drop)
     start_time = time()
     args.LOGGER.info(f'Processing chunk {num_chunk} out of {args.chunks}')
     chunk_length = len(lat_codes) / args.chunks
@@ -511,10 +504,9 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 momentum=args.momentum, frs_method=args.face_recog_method, 
                 loss_type=args.loss, transform=transform, 
                 ellipse_mat=ellipse_mat, proj_mat=proj_mat, dirs=dirs, 
-                dirs_inv=dirs_inv, red_dirs=red_dirs, red_dirs_inv=red_dirs_inv,
-                red_ellipse_mat=red_ellipse_mat, random_init=True, 
-                rand_init_on_surf=not args.not_on_surf, lin_comb=args.lin_comb, 
-                restarts=args.restarts
+                dirs_inv=dirs_inv, red_ellipse_mat=red_ellipse_mat, 
+                random_init=True, rand_init_on_surf=not args.not_on_surf, 
+                lin_comb=args.lin_comb, restarts=args.restarts
             )
         else:
             curr_deltas, succ, mags = find_adversaries_autoattack(
@@ -523,8 +515,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 lin_comb=args.lin_comb, attack_type=args.attack_type, dirs=dirs,
                 red_dirs=red_dirs, red_ellipse_mat=red_ellipse_mat, 
                 ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv,
-                red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat, 
-                iters=args.iters, restarts=args.restarts, 
+                proj_mat=proj_mat, iters=args.iters, restarts=args.restarts, 
                 n_target_classes=args.n_target_classes, dirs_inv=dirs_inv
             )
         
