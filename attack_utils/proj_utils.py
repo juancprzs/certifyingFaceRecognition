@@ -667,7 +667,7 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
         assert this_file in all_bounds, \
             f'Boundary for attr "{att_name}" not found!'
         # Load vector and modify its magnitude
-        this_dir = magn * np.load(this_file)
+        this_dir = np.load(this_file) # magn * np.load(this_file)
         magns.append(magn)
         dirs.append(this_dir)
         files.append(this_file)
