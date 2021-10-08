@@ -18,6 +18,6 @@ source venv/bin/activate
 python main_attack.py \
 --chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --load-embs --embs-file embs.pth --iters 20 --restarts 10 \
---lr 1e+0 \
+--lr 1e+1 \
 --loss diff \
 --output-dir search_adam_diff_lr1e+1
