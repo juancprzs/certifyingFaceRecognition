@@ -196,8 +196,7 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
             scores = -all_dists / np.sqrt(EMB_SIZE)
         else:
             scores = -all_dists
-        xent = F.cross_entropy(input=scores, target=labels, 
-            reduction='none')
+        xent = F.cross_entropy(input=scores, target=labels, reduction='none')
         # It's the cross-entropy loss, so we want to maximize it
         return -1. * xent.mean()
     # --> 'dlr' loss (difference-of-logits ratio)
@@ -215,15 +214,21 @@ def compute_loss(all_dists, labels, loss_type='away', use_probs=True,
 
 
 def init_deltas(random_init, lin_comb, n_vecs, on_surface, ellipse_mat, 
-        proj_mat, dirs, dirs_inv):
+        proj_mat, dirs):
     if random_init:
-        # Sample from ellipsoid and project
-        deltas = sample_ellipsoid(ellipse_mat, n_vecs=n_vecs)
-        deltas, _ = proj2region(deltas, proj_mat, ellipse_mat, check=True, 
-            dirs=dirs, on_surface=on_surface)
-        if lin_comb: # Express the computed delta as a lin comb of our dirs
-            # The current deltas is of shape [batch_size, lat_space]
-            deltas = (dirs_inv @ deltas.T).T
+        if lin_comb:
+            ell_mat = torch.diag(ellipse_mat)
+            deltas = sample_ellipsoid(ell_mat, n_vecs=n_vecs)
+            if on_surface:
+                deltas, _ = proj2region(
+                    deltas, proj_mat=None, ellipse_mat=ell_mat, check=True, 
+                    to_subs=False, dirs=None, on_surface=on_surface
+                )
+        else:
+            # Sample from ellipsoid and project
+            deltas = sample_ellipsoid(ellipse_mat, n_vecs=n_vecs)
+            deltas, _ = proj2region(deltas, proj_mat, ellipse_mat, check=True, 
+                dirs=dirs, on_surface=on_surface)
     else:
         deltas = torch.zeros(n_vecs, EMB_SIZE)
 
@@ -325,15 +330,16 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
         lr, iters, momentum, frs_method, loss_type, transform, ellipse_mat, 
         proj_mat, dirs, dirs_inv, red_ellipse_mat, random_init=True, 
         rand_init_on_surf=True, lin_comb=True, restarts=5):
+    ell_mat = red_ellipse_mat if lin_comb else ellipse_mat
+    batch_size = lat_codes.size(0)
     # The best deltas (the ones to return at the end)
     best_deltas = torch.zeros(
-        lat_codes.size(0), dirs.size(1) if lin_comb else EMB_SIZE).to(DEVICE)
+        batch_size, dirs.size(1) if lin_comb else EMB_SIZE).to(DEVICE)
     best_deltas.requires_grad = False
     for idx_rest in range(restarts):
         # (Re-)Initialize deltas that haven't been successful
-        deltas = init_deltas(random_init, lin_comb, lat_codes.size(0), 
-            rand_init_on_surf, ellipse_mat, proj_mat, dirs, dirs_inv)
-        
+        deltas = init_deltas(random_init, lin_comb, batch_size, 
+            rand_init_on_surf, ell_mat, proj_mat, dirs)
         deltas = deltas.clone().detach().requires_grad_(True)
         # Their corresponding optimizer
         optim = get_optim(deltas, optim_name=opt_name, lr=lr, momentum=momentum)
@@ -363,17 +369,18 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
                         to_subs=False, check=True, on_surface=False,
                         diag_ellipse_mat=True
                     )
-                    deltas[:] = projj[:]
                 else: # Project to high-dimensional ellipsoid
-                    deltas, _ = proj2region(best_deltas, proj_mat, ellipse_mat,
+                    projj, _ = proj2region(best_deltas, proj_mat, ellipse_mat,
                         check=True, dirs=dirs, on_surface=False)
+                
+                deltas[:] = projj
+        
+        if torch.all(success): break
 
     # Final check of deltas
-    try:
-        magnitudes = check_deltas(best_deltas, lin_comb, red_ellipse_mat, ellipse_mat, 
-            proj_mat)
-    except: 
-        import pdb; pdb.set_trace()
+    magnitudes = check_deltas(best_deltas, lin_comb, red_ellipse_mat, 
+        ellipse_mat, proj_mat)
+    
     return best_deltas.detach().cpu(), success, magnitudes
 
 
