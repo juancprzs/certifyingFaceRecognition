@@ -18,6 +18,7 @@ source venv/bin/activate
 python main_attack.py \
 --chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --load-embs --embs-file embs.pth --iters 20 --restarts 20 \
+--not-on-surf \
 --lr 1e+1 \
 --loss xent \
---output-dir search_debug_xent_lr1e+1
+--output-dir search_debug_notsurf_xent_lr1e+1
