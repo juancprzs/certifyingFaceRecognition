@@ -5,7 +5,7 @@
 #SBATCH -J search_debug_xent_lr1e+1
 #SBATCH -o logs/search_debug_xent_lr1e+1.%J.out
 #SBATCH -e logs/search_debug_xent_lr1e+1.%J.err
-#SBATCH --time=1:00:00
+#SBATCH --time=2:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
