@@ -7,7 +7,7 @@
 #SBATCH -e logs/search_debug_xent_lr1e+1.%J.err
 #SBATCH --time=2:00:00
 #SBATCH --mem=32G
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=1
 #SBATCH --mail-user=perezjc@kaust.edu.sa
 #SBATCH --mail-type=ALL
