@@ -8,7 +8,7 @@ from attack_utils.gen_utils import (get_transform, lat2embs,
 from main_attack import get_net, get_transform
 
 
-class wraped_model(nn.Module):
+class wrapped_model(nn.Module):
     def __init__(self, direction_matrix, face_recog='insightface') -> None:
         super().__init__()
         
