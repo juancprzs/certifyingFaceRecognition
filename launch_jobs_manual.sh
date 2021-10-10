@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --partition=batch
-#SBATCH --array=0-249:10
-#SBATCH -J search_debug_notsurf_xent_lr1e+1
-#SBATCH -o logs/search_debug_notsurf_xent_lr1e+1.%J.out
-#SBATCH -e logs/search_debug_notsurf_xent_lr1e+1.%J.err
+#SBATCH --array=120-129
+#SBATCH -J small_search_notsurf_adam_it1_rest100_lr1e+0
+#SBATCH -o logs/small_search_notsurf_adam_it1_rest100_lr1e+0.%J.out
+#SBATCH -e logs/small_search_notsurf_adam_it1_rest100_lr1e+0.%J.err
 #SBATCH --time=2:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:v100:1
@@ -17,8 +17,8 @@ source venv/bin/activate
 
 python main_attack.py \
 --chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
---load-embs --embs-file embs.pth --iters 20 --restarts 20 \
+--load-embs --embs-file embs.pth --iters 1 --restarts 100 \
 --not-on-surf \
---lr 1e+1 \
+--lr 1e+0 \
 --loss xent \
---output-dir search_debug_notsurf_xent_lr1e+1
+--output-dir small_search_notsurf_adam_it1_rest100_lr1e+0
