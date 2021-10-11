@@ -336,8 +336,9 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
     best_deltas = torch.zeros(
         batch_size, dirs.size(1) if lin_comb else EMB_SIZE).to(DEVICE)
     best_deltas.requires_grad = False
+    found_adv = torch.zeros(batch_size, dtype=bool).to(DEVICE) # All False
     for idx_rest in range(restarts):
-        # (Re-)Initialize deltas that haven't been successful
+        # (Re-)Initialize deltas
         deltas = init_deltas(random_init, lin_comb, batch_size, 
             rand_init_on_surf, ell_mat, proj_mat, dirs)
         deltas = deltas.clone().detach().requires_grad_(True)
@@ -351,8 +352,10 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
                 lat_codes+perturbation, transform, orig_embs, frs_method)
             preds = torch.argmin(all_dists, 1)
             success = preds != labels
-            best_deltas[success] = deltas[success].clone().detach()
-            if torch.all(success): break
+            where_mod = success & (~found_adv) # Where successful and not found
+            best_deltas[where_mod] = deltas[where_mod].clone().detach()
+            found_adv = success | found_adv # Or
+            if torch.all(found_adv): break
             # Compute loss
             loss = compute_loss(all_dists, labels, loss_type=loss_type,
                 use_probs=loss_type!='dlr')
@@ -370,18 +373,18 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
                         diag_ellipse_mat=True
                     )
                 else: # Project to high-dimensional ellipsoid
-                    projj, _ = proj2region(best_deltas, proj_mat, ellipse_mat,
+                    projj, _ = proj2region(deltas, proj_mat, ellipse_mat,
                         check=True, dirs=dirs, on_surface=False)
                 
                 deltas[:] = projj
         
-        if torch.all(success): break
+        if torch.all(found_adv): break
 
     # Final check of deltas
     magnitudes = check_deltas(best_deltas, lin_comb, red_ellipse_mat, 
         ellipse_mat, proj_mat)
     
-    return best_deltas.detach().cpu(), success, magnitudes
+    return best_deltas.detach().cpu(), found_adv, magnitudes
 
 
 def check_advs(labels, curr_preds, successes, args):
@@ -497,6 +500,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
     pbar = tqdm(generator.get_batch_inputs(lat_cods_chunk))
     n_succ, tot = 0, 0
     for idx, btch_cods in enumerate(pbar):
+        set_seed(DEVICE, seed=args.seed + num_chunk * chunk_length + idx)
         # 'Compute' the labels: indices in original array
         batch_size = btch_cods.size(0)
         begin = idx * batch_size # Current index times the batch size
