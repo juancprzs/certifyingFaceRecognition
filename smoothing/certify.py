@@ -96,15 +96,16 @@ if __name__ == "__main__":
     )
 
     # Number of identities is the number of latents
-    num_classes = dataset.shape[0]
+    num_classes = dataset.shape[1]
     # Getting the number of directions we are going to certify
     number_of_dirs = directions.shape[0]
     # Initializing the perturbation along these directions to 0
     x = torch.zeros((1, number_of_dirs), device=device)
     
+    smoothed_classifier = Smooth(model, num_classes, sigma, certificate)
+    
     for i in tqdm(range(num_classes)):
-        # only certify every args.skip examples, and stop after args.max
-        # examples
+        # only certify every args.skip examples, and stop after args.max examples
         if i % args.skip != 0:
             continue
         if i == args.max:
@@ -114,10 +115,9 @@ if __name__ == "__main__":
 
         before_time = time()
 
-        # certify the point
-        smoothed_classifier = Smooth(model, num_classes, sigma, certificate)
+        # certify the point 
         prediction, gap = smoothed_classifier.certify(
-            z, x, args.N0, args.N, args.alpha, args.batch_sz
+            z.unsqueeze(0), x, args.N0, args.N, args.alpha, args.batch_sz
         )
         after_time = time()
 

@@ -23,7 +23,7 @@ class wrapped_model(nn.Module):
         # Needed transformations for the generated images.
         self.transform = get_transform(INP_RESOLS[face_recog], MEAN, STD)
 
-        # The matrix for semantic directions
+        # The matrix for semantic directions: Dim=[num_directions, latent_dimension]
         self.proj_matrix = direction_matrix
 
         # Getting the latents for our identities.
@@ -32,7 +32,7 @@ class wrapped_model(nn.Module):
         # Computing original embeddings for these identities.
         print("Computing original embeddings.")
         self.original_embeddings = lat2embs(Generator, self.face_reco, latents,
-                self.transform, few=False, with_tqdm=True, return_ims=False)
+                self.transform, few=False, with_tqdm=True, return_ims=False)[0]
 
     def compute_probs(self, embedding):
         #Compute the probability based on distances.
@@ -43,12 +43,12 @@ class wrapped_model(nn.Module):
 
     def forward(self, x, p=0):
         # Adding perturbations to the latent
-        x = x + torch.matmul(self.proj_mat, p)
+        x = x + torch.matmul(p, self.proj_matrix)
         # Generate the face
-        x = self.generator(x)
+        x = self.generator(x.cpu().numpy())['image']
         # Transform (Resize)
         x = self.transform(x)
         # Compute Embedding
         x = self.face_reco(x)
         # Get probability vector
-        return  self.compute_probs(x)
+        return  self.compute_probs(x.cpu()).to(DEVICE)
