@@ -16,7 +16,7 @@ def parse_args():
                         help='Momentum for SGD')
     parser.add_argument('--loss', type=str, default='diff', choices=LOSS_TYPES,
                         help='Loss to optimize')
-    parser.add_argument('--optim', type=str, default='Adam', choices=OPTIMS,
+    parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
                         help='Optimizer to use')
     parser.add_argument('--no-lin-comb', action='store_true', default=False,
 		                help='Compute adv in terms of lin. comb. of directions')
