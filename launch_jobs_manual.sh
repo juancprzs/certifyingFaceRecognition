@@ -3,8 +3,8 @@
 #SBATCH --partition=batch
 #SBATCH --array=0-249:10
 #SBATCH -J searchLossAndLr_rest5_it10_lossxent_lr1e+2
-#SBATCH -o logs/searchLossAndLr_rest5_it10_loss.%J.outxent_lr1e+2
-#SBATCH -e logs/searchLossAndLr_rest5_it10_loss.%J.errxent_lr1e+2
+#SBATCH -o logs/searchLossAndLr_rest5_it10_lossxent_lr1e+2.%J.out
+#SBATCH -e logs/searchLossAndLr_rest5_it10_lossxent_lr1e+2.%J.err
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
