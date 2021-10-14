@@ -4,8 +4,10 @@ import torch
 import datetime
 from tqdm import tqdm
 
-from .certificate import L2Certificate
-from .smooth import Smooth
+from smoothing.smooth import Smooth
+from smoothing.certificate import L2Certificate
+from models.smoothing_model import WrappedModel
+from attack_utils.gen_utils import get_latent_codes, get_all_matrices
 
 
 if __name__ == "__main__":
@@ -26,14 +28,13 @@ if __name__ == "__main__":
         "in isotropic_dd and ancer"
     )
     parser.add_argument(
-        "--anisortopic-sigma-path", type=str, default=None,
+        "--anisotropic-sigma-path", type=str, default=None,
         help="Path to Anisotropic Sigma that can be used in certification"
     )
 
     # dataset options
     parser.add_argument(
-        "--latent-path", type=str, default=None, required=True,
-        help="dataset folder path, required for ImageNet"
+        '--embs-file', type=str, default=None, help='Load embs from this file'
     )
     parser.add_argument(
         "--directions-path", type=str, default=None, required=True,
@@ -67,48 +68,50 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    from .model import wraped_model
+    # Load the matrix of directions
+    dirs = get_all_matrices()[3].T
+    device = dirs.device
+    # Instantiate the wrapped model
+    model = WrappedModel(dirs, args.face_recog_model, args.embs_file)
 
-    # load the base classifier
-    directions = torch.load(args.directions_path)
-    model = wraped_model(directions, args.face_recog_model)
-
-    # get the dataset
-    dataset = torch.load(args.latent_path)    
+    # Get the dataset of latent codes
+    dataset = model.latents
+    dataset = dataset.to(device)
 
     # get the type of certificate
     certificate = L2Certificate(1, device=device)
 
     # Loading sigma for smoothing
-    if args.anisortopic_sigma_path is None:
+    if args.anisotropic_sigma_path is None:
         sigma = torch.tensor([args.sigma], device=device)
     else:
-        sigma = torch.load(args.anisortopic_sigma_path).to(device)
+        sigma = torch.load(args.anisotropic_sigma_path).to(device)
 
     # prepare output file
-    f = open(args.outfile, 'w')
-    print(
-        "idx\tlabel\tpredict\tcorrect\tgap\tradius\ttime",
-        file=f,
-        flush=True
-    )
+    with open(args.outfile, 'w+') as f:
+        print(
+            "idx\tlabel\tpredict\tcorrect\tgap\tradius\ttime",
+            file=f,
+            flush=True
+        )
 
     # Number of identities is the number of latents
-    num_classes = dataset.shape[1]
+    num_classes = dataset.shape[0]
+    print(f'Found {num_classes} classes')
     # Getting the number of directions we are going to certify
-    number_of_dirs = directions.shape[0]
+    num_dirs = dirs.shape[0]
+    print(f'Found {num_dirs} directions')
     # Initializing the perturbation along these directions to 0
-    x = torch.zeros((1, number_of_dirs), device=device)
+    x = torch.zeros((1, num_dirs), device=device)
     
     smoothed_classifier = Smooth(model, num_classes, sigma, certificate)
     
     for i in tqdm(range(num_classes)):
-        # only certify every args.skip examples, and stop after args.max examples
-        if i % args.skip != 0:
+        # Only certify every args.skip examples. Stop after args.max examples
+        if (i + 1) % args.skip != 0:
             continue
-        if i == args.max:
+        if (i + 1) == args.max:
             break
 
         z, label = dataset[i].to(device), torch.tensor([i], device=device)
@@ -129,16 +132,16 @@ if __name__ == "__main__":
 
         time_elapsed = str(datetime.timedelta(
             seconds=(after_time - before_time)))
-        print(
-            "{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{}".format(
-                i,
-                label,
-                prediction,
-                correct,
-                gap,
-                radius,
-                time_elapsed),
-            file=f,
-            flush=True
-        )
-    f.close()
+        with open(args.outfile, 'a') as f:
+            print(
+                "{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{}".format(
+                    i,
+                    label.item(),
+                    prediction,
+                    correct,
+                    gap,
+                    radius,
+                    time_elapsed),
+                file=f,
+                flush=True
+            )
