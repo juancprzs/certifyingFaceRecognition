@@ -37,10 +37,6 @@ if __name__ == "__main__":
         '--embs-file', type=str, default=None, help='Load embs from this file'
     )
     parser.add_argument(
-        "--directions-path", type=str, default=None, required=True,
-        help="dataset folder path, required for ImageNet"
-    )
-    parser.add_argument(
         "--skip", type=int, default=1,
         help="skip examples in the dataset"
     )
