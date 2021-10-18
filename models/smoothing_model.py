@@ -48,7 +48,7 @@ class WrappedModel(nn.Module):
         # Compute the probability based on distances.
         all_dists = torch.cdist(embedding, self.orig_embs, 
                                 compute_mode='donot_use_mm_for_euclid_dist')
-        all_dists = all_dists / np.sqrt(EMB_SIZE)
+        # all_dists = all_dists / np.sqrt(EMB_SIZE)
         return F.softmax(-all_dists, dim=1)
 
     def forward(self, x, p=0):
