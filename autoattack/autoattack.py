@@ -7,16 +7,14 @@ import torch
 from .other_utils import Logger
 from autoattack import checks
 
-from attack_utils.proj_utils import sq_distance
+from attack_utils.proj_utils import sq_distance_diag
 
 
 class AutoAttack():
     def __init__(self, model, norm='Linf', eps=.3, seed=None, verbose=True,
                  attacks_to_run=[], version='standard', is_tf_model=False,
-                 device='cuda', log_path=None, lin_comb=False, ellipse_mat=None, 
-                 red_ellipse_mat=None, ellipse_mat_inv=None, 
-                 red_ellipse_mat_inv=None, proj_mat=None, dirs=None, 
-                 dirs_inv=None):
+                 device='cuda', log_path=None, ellipse_mat=None, 
+                 ellipse_mat_inv=None):
         self.model = model
         self.norm = norm
         assert norm in ['Linf', 'L2', 'L1', 'Lsigma2']
@@ -28,7 +26,6 @@ class AutoAttack():
         self.is_tf_model = is_tf_model
         self.device = device
         self.logger = Logger(log_path)
-        self.lin_comb = lin_comb
         
         if not self.is_tf_model:
             from .autopgd_base import APGDAttack
@@ -36,36 +33,30 @@ class AutoAttack():
                 self.model, n_restarts=5, n_iter=100, verbose=False, 
                 eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
                 seed=self.seed, device=self.device, logger=self.logger, 
-                lin_comb=self.lin_comb, ellipse_mat=ellipse_mat, 
-                red_ellipse_mat=red_ellipse_mat,
-                ellipse_mat_inv=ellipse_mat_inv, 
-                red_ellipse_mat_inv=red_ellipse_mat_inv
+                ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv
             )
             
             from .fab_pt import FABAttack_PT
             self.fab = FABAttack_PT(
                 self.model, n_restarts=5, n_iter=100, eps=self.epsilon, 
                 seed=self.seed,norm=self.norm, verbose=False, 
-                device=self.device, lin_comb=self.lin_comb, 
-                ellipse_mat=ellipse_mat, red_ellipse_mat=red_ellipse_mat,
-                ellipse_mat_inv=ellipse_mat_inv, 
-                red_ellipse_mat_inv=red_ellipse_mat_inv, proj_mat=proj_mat,
-                dirs=dirs, dirs_inv=dirs_inv
+                device=self.device, ellipse_mat=ellipse_mat,
+                ellipse_mat_inv=ellipse_mat_inv
             )
         
             from .square import SquareAttack
-            self.square = SquareAttack(self.model, p_init=.8, n_queries=5000, eps=self.epsilon, norm=self.norm,
-                n_restarts=1, seed=self.seed, verbose=False, device=self.device, resc_schedule=False)
+            self.square = SquareAttack(
+                self.model, p_init=.8, n_queries=5000, eps=self.epsilon, 
+                norm=self.norm, n_restarts=1, seed=self.seed, verbose=False, 
+                device=self.device, resc_schedule=False
+            )
                 
             from .autopgd_base import APGDAttack_targeted
             self.apgd_targeted = APGDAttack_targeted(
                 self.model, n_restarts=1, n_iter=100, verbose=False, 
                 eps=self.epsilon, norm=self.norm, eot_iter=1, rho=.75, 
                 seed=self.seed, device=self.device, logger=self.logger, 
-                lin_comb=self.lin_comb, ellipse_mat=ellipse_mat, 
-                red_ellipse_mat=red_ellipse_mat,
-                ellipse_mat_inv=ellipse_mat_inv, 
-                red_ellipse_mat_inv=red_ellipse_mat_inv
+                ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv
             )
     
         else:
@@ -236,7 +227,7 @@ class AutoAttack():
                 elif self.norm == 'Lsigma2': # Our modification
                     diff = x_adv - x_orig
                     # res = (diff ** 2).reshape(x_orig.shape[0], -1).sum(-1).sqrt()
-                    res = sq_distance(self.fab.mat, diff.squeeze(3)).sqrt()
+                    res = sq_distance_diag(self.fab.mat, diff.squeeze(3)).sqrt()
                 
                 self.logger.log('max {} perturbation: {:.5f}, nan in tensor: {}, max: {:.5f}, min: {:.5f}'.format(
                     self.norm, res.max(), (x_adv != x_adv).sum(), x_adv.max(), x_adv.min()))

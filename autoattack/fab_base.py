@@ -20,7 +20,7 @@ from autoattack.fab_projections import projection_linf, projection_l2,\
 DEFAULT_EPS_DICT_BY_NORM = {'Linf': .3, 'L2': 1., 'L1': 5.0, 'Lsigma2': None}
 
 # Modified by us
-from attack_utils.proj_utils import sq_distance
+from attack_utils.proj_utils import sq_distance_diag # sq_distance
 from attack_utils.gen_utils import init_deltas
 
 class FABAttack():
@@ -52,14 +52,8 @@ class FABAttack():
             targeted=False,
             device=None,
             n_target_classes=9,
-            lin_comb=False,
             ellipse_mat=None, 
-            red_ellipse_mat=None,
-            ellipse_mat_inv=None, 
-            red_ellipse_mat_inv=None,
-            proj_mat=None,
-            dirs=None,
-            dirs_inv=None):
+            ellipse_mat_inv=None):
         """ FAB-attack implementation in pytorch """
 
         self.norm = norm
@@ -75,13 +69,8 @@ class FABAttack():
         self.target_class = None
         self.device = device
         self.n_target_classes = n_target_classes
-        self.lin_comb = lin_comb
-        self.mat = red_ellipse_mat if self.lin_comb else ellipse_mat
-        self.mat_inv = red_ellipse_mat_inv if self.lin_comb else ellipse_mat_inv
-        self.ellipse_mat = ellipse_mat
-        self.proj_mat = proj_mat
-        self.dirs = dirs
-        self.dirs_inv = dirs_inv
+        self.mat = ellipse_mat
+        self.mat_inv = ellipse_mat_inv
 
     def check_shape(self, x):
         return x if len(x.shape) > 0 else x.unsqueeze(0)
@@ -186,11 +175,11 @@ class FABAttack():
                     x1 = im2 + step
                 elif self.norm == 'Lsigma2': # Our modification
                     # Sample some random noise (hardcoded on_surface)
+                    # import pdb; pdb.set_trace()
                     deltas = init_deltas(
-                        random_init=True, lin_comb=self.lin_comb, 
-                        n_vecs=x.size(0), on_surface=True,
-                        ellipse_mat=self.ellipse_mat, proj_mat=self.proj_mat,
-                        dirs=self.dirs
+                        random_init=True, lin_comb=True, n_vecs=x.size(0), 
+                        on_surface=True, ellipse_mat=self.mat, proj_mat=None, 
+                        dirs=None
                     )
                     # Add the step
                     x1 = im2 + deltas.unsqueeze(2).unsqueeze(3)
@@ -233,7 +222,9 @@ class FABAttack():
                         bs, n_cls = dg.size(0), dg.size(1)
                         temp_dg = temp_dg.reshape(bs * n_cls, -1, 1)
                         # Compute the distances (this is with the dual norm!)
-                        coeff = torch.sqrt(sq_distance(self.mat_inv, temp_dg))
+                        # coeff = torch.sqrt(sq_distance(self.mat_inv, temp_dg))
+                        # mat is diag, so computing bilinear form is simplified
+                        coeff = sq_distance_diag(self.mat_inv, temp_dg).sqrt()
                         # Segment dimensions
                         coeff = coeff.reshape(bs, n_cls)
                         dist1 = df.abs() / (coeff + 1e-12)
@@ -246,7 +237,9 @@ class FABAttack():
                     # account the ellipse matrix
                     # Remove dims for simulating images
                     # term_add = (dg2 * x1).reshape(x1.shape[0], -1).sum(dim=-1)
-                    term_add = sq_distance(self.mat, dg2.squeeze(3), 
+                    # term_add = sq_distance(self.mat, dg2.squeeze(3), 
+                    #     x1.squeeze(3))
+                    term_add = sq_distance_diag(self.mat, dg2.squeeze(3), 
                         x1.squeeze(3))
                     b = -df[u1, ind] + term_add
                     w = dg2.reshape([bs, -1])
@@ -300,7 +293,7 @@ class FABAttack():
                         # I think the operation on d3 should take into account 
                         # the ellipse matrix
                         # a0 = (d3 ** 2).sum(dim=1, keepdim=True).sqrt()
-                        a0 = sq_distance(self.mat, d3.unsqueeze(2)).sqrt()
+                        a0 = sq_distance_diag(self.mat, d3.unsqueeze(2)).sqrt()
                         a0 = a0.view(-1, *[1]*self.ndims)
                     
                     # a0 = torch.max(a0, 1e-8 * torch.ones(a0.shape))
@@ -355,7 +348,8 @@ class FABAttack():
                             diff = x1[ind_adv] - im2[ind_adv]
                             # t = (diff ** 2).reshape(ind_adv.shape[0], -1)
                             # t = t.sum(dim=-1).sqrt()
-                            t = sq_distance(self.mat, diff.squeeze(3)).sqrt()
+                            t = sq_distance_diag(self.mat, diff.squeeze(3))
+                            t = t.sqrt()
                         
                         where_less = (t < res2[ind_adv]).float()
                         where_more = (t >= res2[ind_adv]).float()
@@ -421,7 +415,7 @@ class FABAttack():
                             res = x_to_fool - adv_curr
                             # res = res.reshape(x_to_fool.shape[0], -1)
                             # res = res.sum(dim=-1).sqrt()
-                            res = sq_distance(self.mat, res.squeeze(3)).sqrt()
+                            res = sq_distance_diag(self.mat, res.squeeze(3)).sqrt()
                         
                         temp_pred = self._predict_fn(adv_curr).max(1)[1]
                         acc_curr = temp_pred == y_to_fool
@@ -477,7 +471,7 @@ class FABAttack():
                                 res = x_to_fool - adv_curr
                                 # res = res.reshape(x_to_fool.shape[0], -1)
                                 # res = res.sum(dim=-1).sqrt()
-                                res = sq_distance(self.mat, res.squeeze(3))
+                                res = sq_distance_diag(self.mat, res.squeeze(3))
                                 res = res.sqrt()
 
                             temp_pred = self._predict_fn(adv_curr).max(1)[1]

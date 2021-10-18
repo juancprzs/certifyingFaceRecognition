@@ -24,7 +24,6 @@ from models.mod_stylegan_generator import ModStyleGANGenerator
 from attack_utils.gen_utils import (get_transform, eval_chunk, lat2embs, 
     eval_files, get_latent_codes, EMB_SIZE, INP_RESOLS, MEAN, STD, DEVICE, 
     KWARGS, GAN_NAME, DATASET)
-from attack_utils.proj_utils import set_seed
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -212,14 +211,12 @@ def main(args):
     if args.num_chunk is None: # evaluate sequentially
         log_files = []
         for num_chunk in range(args.chunks):
-            set_seed(DEVICE, seed=args.seed + num_chunk)
             log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
                 num_chunk, DEVICE, args)
             log_files.append(log_file)
 
         eval_files(log_files, args)
     else: # evaluate a single chunk and exit
-        set_seed(DEVICE, seed=args.seed + args.num_chunk)
         log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
             args.num_chunk, DEVICE, args)
 

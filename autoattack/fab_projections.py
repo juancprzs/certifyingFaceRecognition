@@ -3,7 +3,7 @@ import math
 import torch
 from torch.nn import functional as F
 
-from attack_utils.proj_utils import sq_distance # Our modification
+from attack_utils.proj_utils import sq_distance_diag # sq_distance # Our modification
 
 
 def projection_linf(points_to_project, w_hyperplane, b_hyperplane):
@@ -135,7 +135,7 @@ def projection_lsigma2(points_to_project, w_hyperplane, b_hyperplane,
     dist = torch.matmul(w.unsqueeze(1), t.unsqueeze(2)).squeeze(2).squeeze(1) 
     dist = dist + b
     # The denominator, i.e. the norm of `w` under the sigma-norm
-    w_sigma_norm = sq_distance(ellipse_mat_inv, w.unsqueeze(2))
+    w_sigma_norm = sq_distance_diag(ellipse_mat_inv, w.unsqueeze(2))
     lambd = dist / (w_sigma_norm + 1e-12)
     # The new direction of the vector
     new_direction = torch.matmul(ellipse_mat_inv.unsqueeze(0), w.unsqueeze(2))

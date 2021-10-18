@@ -48,6 +48,20 @@ def sq_distance(A, shifted1, shifted2=None):
     return result.reshape(-1)
 
 
+def sq_distance_diag(mat, vec1, vec2=None):
+    # This function assumes mat is a vector representing a diagonal matrix
+    if vec2 is None:
+        prod = vec1**2
+    else:
+        prod = vec1 * vec2
+    # Expand matrix to match dimensions in the batch size
+    mat_size = mat.size(0)
+    bs = vec1.size(0)
+    mat = mat.view(1, 1, mat_size).expand(bs, 1, mat_size)
+    dists = torch.bmm(mat, prod)
+    return dists.reshape(-1)
+
+
 def proj_ellipse(y, A, mu=None, c=1):
     """ 
         A: matrix defining ellipse (precision mat, i.e. inverse of cov mat)

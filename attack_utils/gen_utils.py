@@ -25,7 +25,7 @@ OPTIMS = ['Adam', 'SGD', 'RMSProp']
 FRS_METHODS = ['insightface', 'facenet']
 KWARGS = { 'latent_space_type' : LAT_SPACE }
 LOSS_TYPES = ['away', 'nearest', 'diff', 'xent', 'dlr']
-ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_recog_png'
+ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_1M'
 ORIG_IMAGES_PATH = osp.join(ORIG_DATA_PATH, 'ims')
 ORIG_TENSORS_PATH = osp.join(ORIG_DATA_PATH, 'tensors')
 LAT_CODES_PATH = osp.join(ORIG_DATA_PATH, f'{LAT_SPACE}.npy')
@@ -247,26 +247,22 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
-        frs_method, transform, lin_comb, attack_type, dirs, dirs_inv,
-        red_ellipse_mat, ellipse_mat, ellipse_mat_inv, proj_mat, iters=5, 
-        restarts=5, n_target_classes=5):
+        frs_method, transform, attack_type, dirs, red_ellipse_mat, 
+        red_ellipse_mat_inv, iters=5, restarts=5, n_target_classes=5):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
     # such that g(delta; x) = f(x + delta)  != y. For this we use helper forward 
     # functions and initializations at 0.
     def forward_pass(deltas):
         deltas = deltas.squeeze(3).squeeze(2) # Remove dims for simulating ims
-        perturbation = (dirs @ deltas.T).T if lin_comb else deltas
+        perturbation = (dirs @ deltas.T).T
         inp = lat_codes + perturbation
         return get_dists_and_logits(generator, net, inp, transform, orig_embs, 
             frs_method)[1] # The logits
     
     # `eps` is set inside AutoAttack (the passed param should be inocuous)
     adversary = AutoAttack(
-        forward_pass, norm='Lsigma2', eps=None, lin_comb=lin_comb, 
-        ellipse_mat=ellipse_mat, red_ellipse_mat=red_ellipse_mat, 
-        ellipse_mat_inv=ellipse_mat_inv, 
-        red_ellipse_mat_inv=None, proj_mat=proj_mat, dirs=dirs,
-        dirs_inv=dirs_inv
+        forward_pass, norm='Lsigma2', eps=None, ellipse_mat=red_ellipse_mat,
+        ellipse_mat_inv=red_ellipse_mat_inv
     )
     adversary.seed = 42
     adversary.attacks_to_run = [attack_type]
@@ -285,8 +281,7 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
         adversary.apgd_targeted.n_target_classes = n_target_classes
 
     # Here we introduce the zeros, as we will be thinking in terms of deltas!
-    deltas_orig = torch.zeros(
-        labels.size(0), dirs.size(1) if lin_comb else EMB_SIZE)
+    deltas_orig = torch.zeros(labels.size(0), dirs.size(1))
     # Simulate images for AutoAttack
     deltas_orig = deltas_orig.unsqueeze(2).unsqueeze(3)
     deltas = adversary.run_standard_evaluation(x_orig=deltas_orig.to(DEVICE), 
@@ -296,7 +291,7 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
 
     # Compute the predictions
     # Perturb latent codes
-    perturbation = (dirs @ deltas.T).T if lin_comb else deltas
+    perturbation = (dirs @ deltas.T).T
     # Compute current predictions and check for attack success
     all_dists, _ = get_dists_and_logits(generator, net, 
         lat_codes+perturbation, transform, orig_embs, frs_method)
@@ -304,8 +299,9 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     success = preds != labels
 
     check = attack_type not in ['fab', 'fab-t'] # FAB attack is minimum norm
-    magnitudes = check_deltas(deltas, lin_comb, red_ellipse_mat, 
-        ellipse_mat, proj_mat, check=check)
+    lin_comb = True
+    magnitudes = check_deltas(deltas, lin_comb, ellipse_mat=None, 
+        red_ellipse_mat=red_ellipse_mat, proj_mat=None, check=check)
 
     return deltas.detach().cpu(), success, magnitudes
 
@@ -473,16 +469,17 @@ def get_all_matrices(attrs2drop=[]):
     red_ellipse_mat = torch.tensor(red_ellipse_mat, dtype=torch.float32, 
         device=DEVICE)
     assert red_ellipse_mat.size(0) == dirs.size(1)
+    red_ellipse_mat_inv = 1 / red_ellipse_mat # Since 'red_ellipse_mat' is diag
     dirs_inv = torch.linalg.pinv(dirs)
     ellipse_mat_inv = torch.linalg.inv(ellipse_mat)
     return (proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, 
-        red_ellipse_mat)
+        red_ellipse_mat, red_ellipse_mat_inv)
 
 
 def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
         args):
     proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, red_ellipse_mat, \
-        = get_all_matrices(args.attrs2drop)
+        red_ellipse_mat_inv = get_all_matrices(args.attrs2drop)
     start_time = time()
     args.LOGGER.info(f'Processing chunk {num_chunk} out of {args.chunks}')
     chunk_length = len(lat_codes) / args.chunks
@@ -520,15 +517,12 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 lin_comb=args.lin_comb, restarts=args.restarts
             )
         else:
-            import pdb; pdb.set_trace()
             curr_deltas, succ, mags = find_adversaries_autoattack(
-                generator, net, btch_cods.to(device), labels, embs, 
+                generator, net, btch_cods.to(device), labels, embs, dirs=dirs,
                 frs_method=args.face_recog_method, transform=transform, 
-                lin_comb=args.lin_comb, attack_type=args.attack_type, dirs=dirs,
-                red_ellipse_mat=red_ellipse_mat, 
-                ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv,
-                proj_mat=proj_mat, iters=args.iters, restarts=args.restarts, 
-                n_target_classes=args.n_target_classes, dirs_inv=dirs_inv
+                attack_type=args.attack_type, red_ellipse_mat=red_ellipse_mat, 
+                red_ellipse_mat_inv=red_ellipse_mat_inv, iters=args.iters, 
+                restarts=args.restarts, n_target_classes=args.n_target_classes
             )
         
         tot += batch_size
@@ -538,7 +532,7 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         magnitudes.append(mags)
         deltas.append(curr_deltas)
         # Show update
-        avg_pert = torch.cat(magnitudes)[torch.cat(successes)].mean()
+        avg_pert = torch.cat(magnitudes)[torch.cat(successes)].sqrt().mean()
         pbar.set_description(
             f'-> {n_succ} advs for {tot} IDs -> avg. pert.: {avg_pert:3.4f}')
 
@@ -576,8 +570,8 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
         plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
-            conf_ims, args, succ_mags)
-        avg_pert = magnitudes[successes].mean().item()
+            conf_ims, args, succ_mags.sqrt())
+        avg_pert = magnitudes[successes].sqrt().mean().item()
         args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
             f'-> avg. pert.: {avg_pert:3.4f}')
     
