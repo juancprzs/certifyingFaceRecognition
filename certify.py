@@ -123,8 +123,9 @@ if __name__ == "__main__":
         # compute radius
         correct = int(prediction == label)
 
-        # I am adding .min here in case of anisotropic guy
+        # I am adding .min here for the anisotropic case
         radius = sigma.min().item() * gap
+        print('Radius:', radius)
 
         time_elapsed = str(datetime.timedelta(
             seconds=(after_time - before_time)))

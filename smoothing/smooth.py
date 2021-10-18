@@ -37,8 +37,9 @@ class Smooth():
         self.certificate = certificate
 
     def certify(
-            self, z: torch.tensor, x: torch.tensor, n0: int, n: int, alpha: float,
-            batch_size: int, device: torch.device = torch.device('cuda:0')
+            self, z: torch.tensor, x: torch.tensor, label: torch.tensor, 
+            n0: int, n: int, alpha: float, batch_size: int, 
+            device: torch.device=torch.device('cuda:0')
     ):
         """Monte Carlo algorithm for certifying that g's prediction around x
         is constant within L2 radius.
@@ -63,6 +64,8 @@ class Smooth():
         counts_selection = self._sample_noise(z, x, n0, batch_size, device=device)
         # use these samples to take a guess at the top class
         cAHat = counts_selection.argmax().item()
+        if cAHat != label:
+            return cAHat, 0.0
         # draw more samples of f(x + epsilon)
         counts_estimation = self._sample_noise(z, x, n, batch_size, device=device)
         # use these samples to estimate a lower bound on pA

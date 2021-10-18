@@ -41,3 +41,10 @@ scp -r /home/perezjc/Documents/cert_real_face_perts/data/stylegan_ffhq_recog_png
 # GAN weights
 scp -r /home/perezjc/Documents/cert_real_face_perts/models/pretrain/ kw60749.kaust.edu.sa:/home/perezjc/cert_real_face_perts/models
 
+The nice chunk is 12 from 25
+Or, equivalently, chunks 120-129 from 250
+
+
+# Generate embeddings
+We run
+frs_method=insightface; python main_attack.py --embs-file embeddings/embs_1M_"$frs_method".pth --restarts 1 --iters 1 --output-dir compute_1M_embs_"$frs_method" --face-recog-method $frs_method
