@@ -65,7 +65,7 @@ class Smooth():
         # use these samples to take a guess at the top class
         cAHat = counts_selection.argmax().item()
         import pdb; pdb.set_trace()
-        if cAHat != label:
+        if cAHat != label.item():
             return cAHat, 0.0
         # draw more samples of f(x + epsilon)
         counts_estimation = self._sample_noise(z, x, n, batch_size, device=device)
