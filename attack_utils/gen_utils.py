@@ -247,7 +247,7 @@ def get_dists_and_logits(generator, net, codes, transform, orig_embs,
 
 
 def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs, 
-        frs_method, transform, lin_comb, attack_type, dirs, red_dirs, dirs_inv,
+        frs_method, transform, lin_comb, attack_type, dirs, dirs_inv,
         red_ellipse_mat, ellipse_mat, ellipse_mat_inv, proj_mat, iters=5, 
         restarts=5, n_target_classes=5):
     # For running AutoAttack, we always think in terms of deltas: find 'deltas'
@@ -304,7 +304,7 @@ def find_adversaries_autoattack(generator, net, lat_codes, labels, orig_embs,
     success = preds != labels
 
     check = attack_type not in ['fab', 'fab-t'] # FAB attack is minimum norm
-    magnitudes = check_deltas(deltas, lin_comb, red_dirs, red_ellipse_mat, 
+    magnitudes = check_deltas(deltas, lin_comb, red_ellipse_mat, 
         ellipse_mat, proj_mat, check=check)
 
     return deltas.detach().cpu(), success, magnitudes
@@ -520,11 +520,12 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
                 lin_comb=args.lin_comb, restarts=args.restarts
             )
         else:
+            import pdb; pdb.set_trace()
             curr_deltas, succ, mags = find_adversaries_autoattack(
                 generator, net, btch_cods.to(device), labels, embs, 
                 frs_method=args.face_recog_method, transform=transform, 
                 lin_comb=args.lin_comb, attack_type=args.attack_type, dirs=dirs,
-                red_dirs=red_dirs, red_ellipse_mat=red_ellipse_mat, 
+                red_ellipse_mat=red_ellipse_mat, 
                 ellipse_mat=ellipse_mat, ellipse_mat_inv=ellipse_mat_inv,
                 proj_mat=proj_mat, iters=args.iters, restarts=args.restarts, 
                 n_target_classes=args.n_target_classes, dirs_inv=dirs_inv
