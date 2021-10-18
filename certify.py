@@ -116,7 +116,7 @@ if __name__ == "__main__":
 
         # certify the point 
         prediction, gap = smoothed_classifier.certify(
-            z.unsqueeze(0), x, args.N0, args.N, args.alpha, args.batch_sz
+            z.unsqueeze(0), x, label, args.N0, args.N, args.alpha, args.batch_sz
         )
         after_time = time()
 
