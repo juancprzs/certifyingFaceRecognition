@@ -11,10 +11,10 @@ ATTACKS = ['fab-t', 'fab', 'apgd-ce', 'apgd-dlr', 'apgd-t', 'manual']
 def parse_args():
     parser = argparse.ArgumentParser(description='Compute semantic adversaries')
     # Optimization parameters
-    parser.add_argument('--lr', type=float, default=1e-0, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e+2, help='Learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, 
                         help='Momentum for SGD')
-    parser.add_argument('--loss', type=str, default='diff', choices=LOSS_TYPES,
+    parser.add_argument('--loss', type=str, default='xent', choices=LOSS_TYPES,
                         help='Loss to optimize')
     parser.add_argument('--optim', type=str, default='SGD', choices=OPTIMS,
                         help='Optimizer to use')
@@ -22,9 +22,9 @@ def parse_args():
 		                help='Compute adv in terms of lin. comb. of directions')
     parser.add_argument('--attack-type', type=str, default='manual', 
                         choices=ATTACKS, help='Attack to perform')
-    parser.add_argument('--iters', type=int, default=50,
+    parser.add_argument('--iters', type=int, default=10,
                         help='Optimization iterations per instance')
-    parser.add_argument('--restarts', type=int, default=100, 
+    parser.add_argument('--restarts', type=int, default=10, 
                         help='num of chunks in which to break the dataset')
     parser.add_argument('--n-target-classes', type=int, default=5, 
                         help='num of classes for targetted attacks')
@@ -52,6 +52,8 @@ def parse_args():
                              'exp_results/logs/results_chunk*of*_*to*.txt')
     parser.add_argument('--load-embs', action='store_true', default=False,
                         help='Whether to load embs from file')
+    parser.add_argument('--load-n-embs', type=int, default=1_000_000, 
+                        help='num of embs. Default is all of them (1M)')
     parser.add_argument('--embs-file', type=str, default=None,
                         help='Load embs from this file')
     # Randomization

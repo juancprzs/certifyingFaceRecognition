@@ -195,10 +195,17 @@ def main(args):
     net = get_net(method=args.face_recog_method)
     # Embeddings of original images
     if args.load_embs:
-        assert args.embs_file is not None
-        args.LOGGER.info(f'Loading embs from file "{args.embs_file}"')
-        embs = torch.load(args.embs_file)
-        args.LOGGER.info(f'Loaded {embs.size(0)} embs')
+        if args.embs_file is None:
+            filename = f'embs_1M_{args.face_recog_method}.pth'
+            read_from = osp.join('embeddings', filename)
+        else:
+            read_from = args.embs_file
+        
+        n_embs = args.load_n_embs
+        args.LOGGER.info(f'Loading embeddings from file "{read_from}"')
+        embs = torch.load(read_from)
+        args.LOGGER.info(f'Loaded {n_embs} out of {embs.size(0)} embeddings')
+        embs = embs[:n_embs]
     else:
         args.LOGGER.info('Generating original embs')
         embs, _ = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
