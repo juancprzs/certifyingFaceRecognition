@@ -20,8 +20,7 @@ N_EMBS=5000
 EXP_DIR=METHOD_$FRS_METHOD-N_$N_EMBS
 
 python main_attack.py \
---not-on-surf \
---load-embs --chunks 50000 --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--not-on-surf --load-embs --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --load-n-embs $N_EMBS \
 --face-recog-method $FRS_METHOD \
 --output-dir $EXP_DIR
