@@ -43,7 +43,7 @@ def parse_args():
                         choices=FRS_METHODS, 
                         help='Face recognition system to use')
     # Evaluation
-    parser.add_argument('--chunks', type=int, default=10, 
+    parser.add_argument('--chunks', type=int, default=50_000, 
                         help='num of chunks in which to break the dataset')
     parser.add_argument('--num-chunk', type=int, default=None, 
                         help='index of chunk to evaluate on')

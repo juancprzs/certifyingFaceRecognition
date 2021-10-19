@@ -13,7 +13,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --account conf-cvpr-2021.11.23-ghanembs
 
-source venv/bin/activate
+# source venv/bin/activate
 
 FRS_METHOD=insightface
 N_EMBS=5000
@@ -21,7 +21,7 @@ EXP_DIR=METHOD_$FRS_METHOD-N_$N_EMBS
 
 python main_attack.py \
 --not-on-surf \
---load-embs --chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--load-embs --chunks 50000 --num-chunk ${SLURM_ARRAY_TASK_ID} \
 --load-n-embs $N_EMBS \
 --face-recog-method $FRS_METHOD \
 --output-dir $EXP_DIR
