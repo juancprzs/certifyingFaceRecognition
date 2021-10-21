@@ -2,10 +2,10 @@
 #SBATCH -N 1
 #SBATCH --partition=batch
 #SBATCH --array=[0-249]
-#SBATCH -J fabt_it10_rest10_targ10
-#SBATCH -o logs/fabt_it10_rest10_targ10.%J.out
-#SBATCH -e logs/fabt_it10_rest10_targ10.%J.err
-#SBATCH --time=4:00:00
+#SBATCH -J FABT_5k
+#SBATCH -o logs/FABT_5k.%J.out
+#SBATCH -e logs/FABT_5k.%J.err
+#SBATCH --time=12:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
@@ -15,11 +15,12 @@
 
 source venv/bin/activate
 
+FRS_METHOD=insightface
+N_EMBS=5000
+EXP_DIR=FABT_METHOD_$FRS_METHOD-N_$N_EMBS
+
 python main_attack.py \
---chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
---load-embs --embs-file embs.pth \
---attack-type fab-t \
---restarts 10 \
---iters 10 \
---n-target-classes 10 \
---output-dir fabt_it10_rest10_targ10
+--attack-type fab-t --load-embs --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--load-n-embs $N_EMBS \
+--face-recog-method $FRS_METHOD \
+--output-dir $EXP_DIR

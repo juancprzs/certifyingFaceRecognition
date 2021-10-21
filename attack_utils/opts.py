@@ -26,7 +26,7 @@ def parse_args():
                         help='Optimization iterations per instance')
     parser.add_argument('--restarts', type=int, default=10, 
                         help='num of chunks in which to break the dataset')
-    parser.add_argument('--n-target-classes', type=int, default=5, 
+    parser.add_argument('--n-target-classes', type=int, default=10, 
                         help='num of classes for targetted attacks')
     # Attribute manipulation
     parser.add_argument('--attrs2drop', nargs='+', default=[], 
