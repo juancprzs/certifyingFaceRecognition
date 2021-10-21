@@ -12,7 +12,11 @@ from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
     proj2region, in_subs, in_ellps, sq_distance)
 
 # Script argument-dependent constants
-INP_RESOLS = { 'insightface' : 112, 'facenet' : 160 }
+INP_RESOLS = { 
+    'insightface'       : 112, 
+    'facenet'           : 160 ,
+    'facenet-vggface2'  : 160
+}
 STD = 0.5
 MEAN = 0.5
 EMB_SIZE = 512
