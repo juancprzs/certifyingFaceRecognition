@@ -659,7 +659,7 @@ def plot_inner_prods(dirs):
 
 
 def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
-        attrs2drop=[]):
+        attrs2drop=[], scale_factor=1.0):
     plot_mat = False
     file_template = osp.join(BOUNDARIES_DIR, 
                              f'{gan_name}_{dataset}_%s_w_boundary.npy')
@@ -695,6 +695,7 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
 
     proj_mat = get_proj_mat(dirs) # proj_mat.shape == [n_dims, n_dims]
     ellipse_mat = get_ellipse_mat(dirs)
+    ellipse_mat = scale_factor * ellipse_mat
 
     # We also compute a lower-dimensional version of the ellipse matrix. This 
     # matrix represents a hyper-ellipsoid that DOES NOT live in the original
@@ -705,6 +706,7 @@ def get_projection_matrices(dataset=DATASETS[0], gan_name=GAN_NAMES[0],
     # Each magnitude is represented as axis-aligned vector
     red_dirs = np.diag(magns)
     red_ellipse_mat = get_ellipse_mat(red_dirs)
+    red_ellipse_mat = scale_factor * red_ellipse_mat
     assert np.all(red_ellipse_mat == np.diag(np.diagonal(red_ellipse_mat))), \
         'Matrix should be diagonal'
     red_ellipse_mat = np.diagonal(red_ellipse_mat)

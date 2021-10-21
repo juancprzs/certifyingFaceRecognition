@@ -457,7 +457,7 @@ def eval_files(log_files, args):
     args.LOGGER.info(f'Saved all results to {args.final_results}')
 
 
-def get_all_matrices(attrs2drop=[]):
+def get_all_matrices(attrs2drop=[], scale_factor=1.0):
     assert type(attrs2drop) == list
     # Several matrices:
     # (1) The projection-to-subspace matrix
@@ -466,7 +466,7 @@ def get_all_matrices(attrs2drop=[]):
     # (4) The diagonal matrix describing the lower-dimensional hyperellipsoid
     proj_mat, ellipse_mat, dirs, red_ellipse_mat, _ = \
         get_projection_matrices(dataset=DATASET, gan_name=GAN_NAME, 
-            attrs2drop=attrs2drop)
+            attrs2drop=attrs2drop, scale_factor=scale_factor)
 
     dirs = torch.tensor(dirs, dtype=torch.float32, device=DEVICE)
     proj_mat = torch.tensor(proj_mat, dtype=torch.float32, device=DEVICE)
@@ -487,7 +487,8 @@ def get_all_matrices(attrs2drop=[]):
 def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device, 
         args):
     proj_mat, ellipse_mat, ellipse_mat_inv, dirs, dirs_inv, red_ellipse_mat, \
-        red_ellipse_mat_inv = get_all_matrices(args.attrs2drop)
+        red_ellipse_mat_inv = get_all_matrices(args.attrs2drop, 
+            scale_factor=args.scale_factor)
     start_time = time()
     args.LOGGER.info(f'Processing chunk {num_chunk} out of {args.chunks}')
     chunk_length = len(lat_codes) / args.chunks

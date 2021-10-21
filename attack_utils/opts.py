@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument('--attrs2drop', nargs='+', default=[], 
                         choices=ATTRS.keys(),
                         help='List of attributes to NOT consider for attacks')
+    parser.add_argument('--scale-factor', type=float, default=1.0, 
+                        help='Factor for scaling Sigma')
     # Initialization
     parser.add_argument('--not-on-surf', action='store_true', default=False,
                         help='Random initialization is NOT on region surface')
