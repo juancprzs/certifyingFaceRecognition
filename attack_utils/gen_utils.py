@@ -22,7 +22,11 @@ IMAGE_EXT = 'png'
 GAN_NAME = 'stylegan'
 DEVICE = torch.device('cuda')
 OPTIMS = ['Adam', 'SGD', 'RMSProp']
-FRS_METHODS = ['insightface', 'facenet']
+FRS_METHODS = [
+    'insightface', # This means ArcFace
+    'facenet', # This means FaceNet trained on CASIA-webface (the default)
+    'facenet-vggface2' # This means FaceNet trained on VGGFace2
+]
 KWARGS = { 'latent_space_type' : LAT_SPACE }
 LOSS_TYPES = ['away', 'nearest', 'diff', 'xent', 'dlr']
 ORIG_DATA_PATH = f'data/{GAN_NAME}_{DATASET}_1M'

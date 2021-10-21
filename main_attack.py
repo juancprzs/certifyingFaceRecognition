@@ -119,11 +119,14 @@ def pil_loader(path: str) -> Image.Image:
 
 
 def get_net(method='insightface'):
-    if method == 'insightface':
+    if method == 'insightface': # This is ArcFace
         net = iresnet50(False, fp16=False) # pretrained==False
         net.load_state_dict(torch.load(WEIGHTS_PATH))
     else:
-        net = InceptionResnetV1(pretrained='casia-webface')
+        if method == 'facenet': # This means trained on CASIA-webface
+            net = InceptionResnetV1(pretrained='casia-webface')
+        elif method == 'facenet-vggface2': # This means trained on VGGFace2
+            net = InceptionResnetV1(pretrained='vggface2')
     
     return net.to(DEVICE).eval()
 
