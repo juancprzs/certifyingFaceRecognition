@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import os.path as osp
 import torch.nn as nn
 import torch.nn.functional as F
 from models.mod_stylegan_generator import ModStyleGANGenerator
