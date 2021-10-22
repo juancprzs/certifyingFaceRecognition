@@ -18,7 +18,7 @@ source venv/bin/activate
 FRS_METHOD=insightface
 N_EMBS=100000
 SIGMA=1e-2
-EXP_DIR=cert_results/sigma_$SIGMA/METHOD_$FRS_METHOD-N_$N_EMBS
+EXP_DIR=cert_results/METHOD_$FRS_METHOD-N_$N_EMBS-SIGMA_$SIGMA
 
 instance=${SLURM_ARRAY_TASK_ID};
 skip=$((1+$instance));
