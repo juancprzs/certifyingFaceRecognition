@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --partition=batch
-#SBATCH --array=0-499
-#SBATCH -J certification
-#SBATCH -o logs/certification.%J.out
-#SBATCH -e logs/certification.%J.err
-#SBATCH --time=2:00:00
+#SBATCH --array=0-50%23
+#SBATCH -J cert_insightface_sigma_1e-2
+#SBATCH -o logs/cert_insightface_sigma_1e-2.%J.out
+#SBATCH -e logs/cert_insightface_sigma_1e-2.%J.err
+#SBATCH --time=3:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=1
@@ -15,14 +15,19 @@
 
 source venv/bin/activate
 
+FRS_METHOD=insightface
+N_EMBS=100000
+SIGMA=1e-2
+EXP_DIR=certif_results/sigma_$SIGMA/METHOD_$FRS_METHOD-N_$N_EMBS
+
 instance=${SLURM_ARRAY_TASK_ID};
 skip=$((1+$instance));
 maxx=$((2*$skip));
 
 python certify.py \
---face-recog-model insightface \
---outfile instance_$instance.txt \
---sigma 1e-2 \
---embs-file embs.pth \
---skip $skip \
---max $maxx
+--skip $skip --max $maxx \
+--outfile $EXP_DIR/instance_$instance.txt \
+--load-n-embs $N_EMBS \
+--face-recog-model $FRS_METHOD \
+--sigma $SIGMA
+

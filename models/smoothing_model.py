@@ -9,8 +9,8 @@ from main_attack import get_net, get_transform
 
 
 class WrappedModel(nn.Module):
-    def __init__(self, direction_matrix, face_recog='insightface', 
-            embs_file=None) -> None:
+    def __init__(self, direction_matrix, face_recog='insightface', n_embs=-1,
+            load_embs=False, embs_file=None) -> None:
         super().__init__()
         
         # Loading the GAN
@@ -32,16 +32,24 @@ class WrappedModel(nn.Module):
         self.latents = get_latent_codes(self.generator).to(self.device)
 
         # Computing original embeddings for these identities.
-        if embs_file is None:
-            print('Computing original embeddings')
+        if load_embs:
+            if embs_file is None:
+                filename = f'embs_1M_{face_recog}.pth'
+                read_from = osp.join('embeddings', filename)
+            else:
+                read_from = embs_file
+            
+            print(f'Loading original embeddings from "{read_from}"')
+            embs = torch.load(read_from)
+            n_embs = embs.shape[0] if n_embs == -1 else n_embs
+            print(f'Loaded {n_embs} out of {embs.size(0)} embeddings')
+            self.orig_embs = embs[:n_embs]
+        else:
+            print('Generating original embeddings')
             self.orig_embs = lat2embs(self.generator, self.face_reco, 
                 self.latents, self.transform, few=False, with_tqdm=True, 
                 return_ims=False)[0]
             print(f'Computed {self.orig_embs.size(0)} embeddings')
-        else:
-            print(f'Loading original embeddings from "{embs_file}"')
-            self.orig_embs = torch.load(embs_file)
-            print(f'Loaded {self.orig_embs.size(0)} embeddings')
 
 
     def compute_probs(self, embedding):
