@@ -34,9 +34,6 @@ if __name__ == "__main__":
 
     # dataset options
     parser.add_argument(
-        '--embs-file', type=str, default=None, help='Load embs from this file'
-    )
-    parser.add_argument(
         "--skip", type=int, default=1,
         help="skip examples in the dataset"
     )
@@ -61,6 +58,8 @@ if __name__ == "__main__":
         "--alpha", type=float, default=0.001,
         help="failure probability"
     )
+    parser.add_argument('--load-n-embs', type=int, default=1_000_000, 
+        help='num of embs. Default is all of them (1M)')
 
     args = parser.parse_args()
 
@@ -69,8 +68,8 @@ if __name__ == "__main__":
     dirs = get_all_matrices()[3].T
     device = dirs.device
     # Instantiate the wrapped model
-    model = WrappedModel(dirs, args.face_recog_model, args.embs_file)
-
+    model = WrappedModel(dirs, args.face_recog_model, n_embs=args.load_n_embs,
+        load_embs=True, embs_file=None)
     # Get the dataset of latent codes
     dataset = model.latents
     dataset = dataset.to(device)
