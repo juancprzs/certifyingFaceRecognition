@@ -1,7 +1,9 @@
-import argparse
-from time import time
+import os
 import torch
+import argparse
 import datetime
+import os.path as osp
+from time import time
 from tqdm import tqdm
 
 from smoothing.smooth import Smooth
@@ -84,6 +86,10 @@ if __name__ == "__main__":
         sigma = torch.load(args.anisotropic_sigma_path).to(device)
 
     # prepare output file
+    parent_dir = osp.dirname(args.outfile)
+    if not osp.exists(parent_dir):
+        os.makedirs(parent_dir, exist_ok=True)
+    
     with open(args.outfile, 'w+') as f:
         print(
             "idx\tlabel\tpredict\tcorrect\tgap\tradius\ttime",
