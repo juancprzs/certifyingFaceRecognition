@@ -9,7 +9,7 @@ from autoattack import AutoAttack
 from torch.optim import SGD, Adam, RMSprop
 from torchvision.transforms import Compose, Normalize
 from .proj_utils import (get_projection_matrices, sample_ellipsoid, set_seed,
-    proj2region, in_subs, in_ellps, sq_distance)
+    proj2region, in_subs, in_ellps, sq_distance, ATTRS)
 
 # Script argument-dependent constants
 INP_RESOLS = { 
