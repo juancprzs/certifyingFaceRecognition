@@ -456,7 +456,7 @@ def eval_files(log_files, data_files, args):
     info = f'successes:{tot_successes}\n' \
         f'instances:{tot_instances}\n' \
         f'rate:{attack_success_rate:4.2f}\n' \
-        f'avg_mag:{avg_magnitude:4.2f}\n '
+        f'avg_mag:{avg_magnitude:4.2f}\n'
 
     # Evaluate the found deltas
     print(f'Computing delta stats based on these {len(data_files)} files: ', 
@@ -469,7 +469,7 @@ def eval_files(log_files, data_files, args):
     for (attr, limit), mean, std in zip(ATTRS.items(), means, stds):
         norm_mean = mean / limit
         norm_std = std / limit
-        info += f'Attribute-{attr}:{norm_mean:2.3f}±{norm_std:2.3f}\n '
+        info += f'Attribute-{attr}:{norm_mean:2.3f}±{norm_std:2.3f}\n'
 
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
