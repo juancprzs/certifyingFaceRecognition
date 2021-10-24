@@ -465,14 +465,18 @@ def eval_files(log_files, data_files, args):
     deltas = torch.cat(deltas)
     magnitudes = [torch.load(x, map_location='cpu')['magnitudes'] for x in data_files]
     magnitudes = torch.cat(magnitudes)
-    import pdb; pdb.set_trace()
+    epsilons = torch.tensor(list(ATTRS.values()))
 
-    means, stds = deltas.abs().mean(0), deltas.abs().std(0)
+    # Individual components
+    comps = deltas**2 / (epsilons**2).unsqueeze(0)
+    assert torch.allclose(magnitudes, comps.sum(1))
+    # Normalized component contributions
+    norm_comps = comps / magnitudes.unsqueeze(1)
+    assert torch.allclose(norm_comps.sum(1), torch.ones_like(magnitudes))
+    means, stds = norm_comps.mean(0), norm_comps.std(0)
 
     for (attr, limit), mean, std in zip(ATTRS.items(), means, stds):
-        norm_mean = mean / limit
-        norm_std = std / limit
-        info += f'Attribute-{attr}:{norm_mean:2.3f}±{norm_std:2.3f}\n'
+        info += f'Attribute-{attr}:{mean:2.3f}±{std:2.3f}\n'
 
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
