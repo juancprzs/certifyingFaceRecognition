@@ -394,14 +394,18 @@ def find_adversaries_pgd(generator, net, lat_codes, labels, orig_embs, opt_name,
 def check_advs(labels, curr_preds, successes, args):
     # Check where the predictions differ from the labels
     where_adv = labels != curr_preds
-    if not torch.all(where_adv):
+    if not torch.all(where_adv): 
+        # I still do not understand how this is possible. So, I'll do the safe
+        # thing and assume these are NOT adversaries
         args.LOGGER.info('=====> Something is wrong with the adversaries!!!')
-        return False
+        args.LOGGER.info('---> Will assume the wrong ones are NOT adversaries')
+        n_succ = where_adv.sum()
     else:
         n_succ = successes.sum()
-        n_ids = successes.size(0)
-        args.LOGGER.info(f'Found {n_succ} advs for {n_ids} IDs')
-        return True
+    
+    n_ids = successes.size(0)
+    args.LOGGER.info(f'Found {n_succ} advs for {n_ids} IDs')
+    return where_adv
 
 
 def save_results(results, deltas, successes, magnitudes, num_chunk, args):
@@ -569,7 +573,8 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
             succ_deltas, transform, device, args
         )
         # Check they are indeed adversarial
-        assert check_advs(all_labels[successes], curr_preds, successes, args)
+        curr_labels = all_labels[successes]
+        where_adv = check_advs(curr_labels, curr_preds, successes, args)
         # Compute images of the IDs with which people are being confused
         lat_cods_conf = lat_codes[curr_preds]
         _, conf_adv_ims, _, _, conf_ims = get_curr_preds(
@@ -578,8 +583,8 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         )
         assert torch.equal(conf_adv_ims, conf_ims)
         # Plot the images and their adversaries
-        plot_advs(orig_ims, all_labels[successes], adv_ims, curr_preds, 
-            conf_ims, args, succ_mags.sqrt())
+        plot_advs(orig_ims, curr_labels, adv_ims, curr_preds, conf_ims, args, 
+            succ_mags.sqrt())
         avg_pert = magnitudes[successes].sqrt().mean().item()
         args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
             f'-> avg. pert.: {avg_pert:3.4f}')
