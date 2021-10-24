@@ -575,19 +575,26 @@ def eval_chunk(generator, net, lat_codes, embs, transform, num_chunk, device,
         # Check they are indeed adversarial
         curr_labels = all_labels[successes]
         where_adv = check_advs(curr_labels, curr_preds, successes, args)
-        # Compute images of the IDs with which people are being confused
-        lat_cods_conf = lat_codes[curr_preds]
-        _, conf_adv_ims, _, _, conf_ims = get_curr_preds(
-            generator, net, embs, lat_cods_conf, 
-            torch.zeros_like(lat_cods_conf), transform, device, args
-        )
-        assert torch.equal(conf_adv_ims, conf_ims)
-        # Plot the images and their adversaries
-        plot_advs(orig_ims, curr_labels, adv_ims, curr_preds, conf_ims, args, 
-            succ_mags.sqrt())
-        avg_pert = magnitudes[successes].sqrt().mean().item()
-        args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
-            f'-> avg. pert.: {avg_pert:3.4f}')
+        if torch.all(~where_adv): # Adversaries are not working
+            args.LOGGER.info('Didnt find any adversary! =(')
+        else:
+            curr_labels = curr_labels[where_adv]
+            curr_preds = curr_preds[where_adv]
+            orig_ims = orig_ims[where_adv]
+            adv_ims = adv_ims[where_adv]
+            # Compute images of the IDs with which people are being confused
+            lat_cods_conf = lat_codes[curr_preds]
+            _, conf_adv_ims, _, _, conf_ims = get_curr_preds(
+                generator, net, embs, lat_cods_conf, 
+                torch.zeros_like(lat_cods_conf), transform, device, args
+            )
+            assert torch.equal(conf_adv_ims, conf_ims)
+            # Plot the images and their adversaries
+            plot_advs(orig_ims, curr_labels, adv_ims, curr_preds, conf_ims, 
+                args, succ_mags.sqrt())
+            avg_pert = magnitudes[successes].sqrt().mean().item()
+            args.LOGGER.info(f'-> Found {n_succ} advs for {tot} IDs ' \
+                f'-> avg. pert.: {avg_pert:3.4f}')
     
     # Log the results
     results = {
