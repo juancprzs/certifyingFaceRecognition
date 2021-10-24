@@ -465,7 +465,7 @@ def eval_files(log_files, data_files, args):
     deltas = torch.cat(deltas)
     magnitudes = [torch.load(x, map_location='cpu')['magnitudes'] for x in data_files]
     magnitudes = torch.cat(magnitudes)
-    import pdb pdb.set_trace()
+    import pdb; pdb.set_trace()
 
     means, stds = deltas.abs().mean(0), deltas.abs().std(0)
 
