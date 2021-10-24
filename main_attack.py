@@ -22,8 +22,8 @@ from facenet_pytorch import InceptionResnetV1
 # Local imports
 from models.mod_stylegan_generator import ModStyleGANGenerator
 from attack_utils.gen_utils import (get_transform, eval_chunk, lat2embs, 
-    eval_files, get_latent_codes, EMB_SIZE, INP_RESOLS, MEAN, STD, DEVICE, 
-    KWARGS, GAN_NAME, DATASET)
+    eval_files, get_latent_codes, compute_delta_stats, EMB_SIZE, INP_RESOLS, 
+    MEAN, STD, DEVICE, KWARGS, GAN_NAME, DATASET)
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -197,6 +197,7 @@ def main(args):
     # DNN
     net = get_net(method=args.face_recog_method)
     # Embeddings of original images
+    n_embs = args.load_n_embs
     if args.load_embs:
         if args.embs_file is None:
             filename = f'embs_1M_{args.face_recog_method}.pth'
@@ -204,31 +205,32 @@ def main(args):
         else:
             read_from = args.embs_file
         
-        n_embs = args.load_n_embs
         args.LOGGER.info(f'Loading embeddings from file "{read_from}"')
         embs = torch.load(read_from)
-        args.LOGGER.info(f'Loaded {n_embs} out of {embs.size(0)} embeddings')
-        embs = embs[:n_embs]
     else:
         args.LOGGER.info('Generating original embs')
         embs, _ = lat2embs(GENERATOR, net, LAT_CODES, transform, with_tqdm=True)
+        args.LOGGER.info(f'Generated a total of {embs.size(0)} embeddings')
         if args.embs_file is not None:
             args.LOGGER.info(f'Saving original embs to file "{args.embs_file}"')
             torch.save(embs, args.embs_file)
-    
-    embs = embs.to(DEVICE)
+
+    embs = embs[:n_embs].to(DEVICE)
+    args.LOGGER.info(f'Loaded {n_embs} out of {embs.size(0)} embeddings')
     # Evaluate either all chunks or a single one
     if args.num_chunk is None: # evaluate sequentially
         log_files = []
         for num_chunk in range(args.chunks):
-            log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
-                num_chunk, DEVICE, args)
+            log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, 
+                transform, num_chunk, DEVICE, args)
             log_files.append(log_file)
 
-        eval_files(log_files, args)
+        data_files = glob(osp.join(args.results_dir, f'results_chunk*of*.pth'))
+        eval_files(log_files, data_files, args)
+
     else: # evaluate a single chunk and exit
-        log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, transform, 
-            args.num_chunk, DEVICE, args)
+        log_file = eval_chunk(GENERATOR, net, LAT_CODES, embs, 
+            transform, args.num_chunk, DEVICE, args)
 
     tot_time = time() - start
     args.LOGGER.info(f'Finished. Total time spent: {tot_time}s')
@@ -400,8 +402,11 @@ if __name__ == '__main__':
     args = parse_args()
     if args.eval_files:
         from glob import glob
-        log_files = glob(osp.join(args.logs_dir, 'results_chunk*of*.txt'))
-        eval_files(log_files, args)
+        filenames = 'results_chunk*of*'
+        log_files = glob(osp.join(args.logs_dir, f'{filenames}.txt'))
+        data_files = glob(osp.join(args.results_dir, f'{filenames}.pth'))
+        eval_files(log_files, data_files, args)
+        
     else:
         # The model and the latent codes
         args.LOGGER.info(f'Initializing generator.')

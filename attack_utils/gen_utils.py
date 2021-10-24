@@ -435,7 +435,8 @@ def save_results(results, deltas, successes, magnitudes, num_chunk, args):
     return log_file
 
 
-def eval_files(log_files, args):
+def eval_files(log_files, data_files, args):
+    # Evaluate attack successes
     print(f'Evaluating based on these {len(log_files)} files: ', log_files)
     tot_instances, tot_successes, tot_magnitudes = 0, 0, 0.
     for log_file in log_files:
@@ -451,11 +452,24 @@ def eval_files(log_files, args):
 
 
     attack_success_rate = 100.*float(tot_successes) / tot_instances
-    avg_magnitude = tot_magnitudes / tot_successes
+    avg_magnitude = tot_magnitudes / tot_successes if tot_successes != 0 else 0
     info = f'successes:{tot_successes}\n' \
         f'instances:{tot_instances}\n' \
         f'rate:{attack_success_rate:4.2f}\n' \
-        f'avg_mag:{avg_magnitude:4.2f}'   
+        f'avg_mag:{avg_magnitude:4.2f}\n '
+
+    # Evaluate the found deltas
+    print(f'Computing delta stats based on these {len(data_files)} files: ', 
+        data_files)
+    deltas = [torch.load(x, map_location='cpu')['deltas'] for x in data_files]
+    deltas = torch.cat(deltas)
+
+    means, stds = deltas.abs().mean(0), deltas.abs().std(0)
+
+    for (attr, limit), mean, std in zip(ATTRS.items(), means, stds):
+        norm_mean = mean / limit
+        norm_std = std / limit
+        info += f'Attribute-{attr}:{norm_mean:2.3f}±{norm_std:2.3f}\n '
 
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
