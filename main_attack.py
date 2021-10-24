@@ -22,8 +22,8 @@ from facenet_pytorch import InceptionResnetV1
 # Local imports
 from models.mod_stylegan_generator import ModStyleGANGenerator
 from attack_utils.gen_utils import (get_transform, eval_chunk, lat2embs, 
-    eval_files, get_latent_codes, compute_delta_stats, EMB_SIZE, INP_RESOLS, 
-    MEAN, STD, DEVICE, KWARGS, GAN_NAME, DATASET)
+    eval_files, get_latent_codes, EMB_SIZE, INP_RESOLS, MEAN, STD, DEVICE, 
+    KWARGS, GAN_NAME, DATASET)
 # To handle too many open files
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -406,7 +406,7 @@ if __name__ == '__main__':
         log_files = glob(osp.join(args.logs_dir, f'{filenames}.txt'))
         data_files = glob(osp.join(args.results_dir, f'{filenames}.pth'))
         eval_files(log_files, data_files, args)
-        
+
     else:
         # The model and the latent codes
         args.LOGGER.info(f'Initializing generator.')
