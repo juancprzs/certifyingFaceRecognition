@@ -4,7 +4,11 @@ from tqdm import tqdm
 from time import time
 import os.path as osp
 import torch.nn.functional as F
+
+import matplotlib
+matplotlib.rcParams['text.usetex'] = True
 import matplotlib.pyplot as plt
+
 from autoattack import AutoAttack
 from torch.optim import SGD, Adam, RMSprop
 from torchvision.transforms import Compose, Normalize
@@ -480,6 +484,28 @@ def eval_files(log_files, data_files, args):
 
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
+
+    # Compare all radii with the magnitudes of the found deltas
+    dists = magnitudes.sqrt()
+    N = dists.size(0)
+    maxx = torch.quantile(dists, 0.99).item() # 99th quantile
+    lins = torch.linspace(0, maxx, N)
+    all_comps = dists.unsqueeze(1) > lins.unsqueeze(0)
+    # Do the counts
+    counts = all_comps.sum(0)
+    # Normalize the counts
+    norm_counts = counts / tot_instances
+    # Plot everything
+    plt.plot(lins, norm_counts)
+    plt.grid(True)
+    plt.xlabel(r'$\|\delta\|_{\Sigma,2}$', fontsize=16)
+    plt.ylabel(r'Accuracy', fontsize=16)
+    plt.title('Accuracy \\textit{vs.} perturbation budget', fontsize=20)
+
+    figname = osp.join(args.output_dir, 'acc_vs_pert.png')
+    plt.savefig(figname, dpi=200)
+    args.LOGGER.info(f'Saved figure to {figname}')
+
 
 
 def get_all_matrices(attrs2drop=[], scale_factor=1.0):
