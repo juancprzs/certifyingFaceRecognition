@@ -4,6 +4,7 @@ from tqdm import tqdm
 from time import time
 import os.path as osp
 import torch.nn.functional as F
+from scipy.stats import friedmanchisquare, wilcoxon
 
 import matplotlib
 matplotlib.rcParams['text.usetex'] = True
@@ -440,6 +441,92 @@ def save_results(results, deltas, successes, magnitudes, num_chunk, args):
 
 
 def eval_files(log_files, data_files, args):
+    def get_ranking(norm_comps):
+        data = { attr_name : norm_comps[:, idx].numpy() 
+            for idx, attr_name in enumerate(ATTRS.keys()) }
+        failed = False
+        n_attr = len(data)
+        attr_names = list(data.keys())
+        data_copy = dict(data)
+        ranking = []
+        alpha = 1e-3
+        for _ in range(n_attr-2):
+            n_attrs = len(data_copy)
+            # Perform Friedman's test
+            pval = friedmanchisquare(*data_copy.values()).pvalue
+            if pval < alpha: # Remaining data does not belong to the same 
+                # distrib, i.e. there is still at least one attribute whose 
+                # components are different from the rest. Now we gotta find 
+                # which is the one that would be ranked the highest
+                curr_data = np.concatenate(
+                    [np.expand_dims(x, 1) for x in data_copy.values()], 
+                    axis=1
+                )
+                # The indices that sort can be understood as the ranking each 
+                # delta gave. This array is of size == to the size of curr_data. 
+                # Its entries are from 0 to curr_data.shape[1]. The i-th row has 
+                # integer numbers from 0 to curr_data.shape[1]-1, like 
+                # [2,1,3,4,0]. This means that the i-th delta voted for the 
+                # ranking of attributes 2 > 1 > 3 > 4 > 0 (from best to worst 
+                # place in the ranking). 
+                argsort = np.argsort(-curr_data, axis=1)
+                # Now we compute the amount of votes for each attribute
+                votes = np.zeros(n_attrs)
+                weights = np.arange(1, n_attrs+1).reshape(-1, n_attrs)
+                for curr_attr in range(n_attrs):
+                    where_curr_attr = argsort == curr_attr
+                    weight_votes = where_curr_attr * weights
+                    votes[curr_attr] = weight_votes.sum()
+                
+                winner_idx = votes.argmin()
+                winner_attr = list(data_copy.keys())[winner_idx]
+                # Append the winner to the ranking list
+                ranking.append(winner_attr)
+                # Remove the winner from the dict
+                data_copy.pop(winner_attr)
+            else:
+                print('Ranking procedure stopped due to non-significance')
+                failed = True
+                break
+
+        if not failed:
+            print('Preliminary ranking checked')
+            # Check the last comparison
+            print('Checking last comparison')
+            k1, k2 = list(data_copy.keys())
+            pval = wilcoxon(x=data[k1], y=data[k2], 
+                alternative='two-sided').pvalue
+            if pval > alpha:
+                print('Last comparison failed. No ranking will be returned')
+                failed = True
+            else: # We can reject equality hypothesis
+                last_pval = wilcoxon(x=data[k1], y=data[k2], 
+                    alternative='greater').pvalue
+                if last_pval < alpha: # reject hypothesis k1 is smaller than k2
+                    ranking.extend([k1, k2])
+                else:
+                    ranking.extend([k2, k1])
+        
+        # Get the p-values
+        if not failed:
+            pvals = []
+            for idx in range(n_attr-1):
+                winner = ranking[idx]
+                runner_up = ranking[idx+1]
+                print(f'Comparing attributes: {winner} vs. {runner_up}')
+                pval = wilcoxon(x=data[winner], y=data[runner_up], 
+                    alternative='greater').pvalue
+                if pval > alpha:
+                    print('Ranking check failed. No ranking will be returned.')
+                    failed = True
+                    break
+                
+                pvals.append(pval)
+
+        if failed:
+            ranking, pvals = None, None
+        
+        return failed, ranking, pvals
     # Evaluate attack successes
     print(f'Evaluating based on these {len(log_files)} files: ', log_files)
     tot_instances, tot_successes, tot_magnitudes = 0, 0, 0.
@@ -462,12 +549,16 @@ def eval_files(log_files, data_files, args):
         f'rate:{attack_success_rate:4.2f}\n' \
         f'avg_mag:{avg_magnitude:4.2f}\n'
 
+    print_to_log(info, args.final_results)
+
     # Evaluate the found deltas
     print(f'Computing delta stats based on these {len(data_files)} files: ', 
         data_files)
     deltas = [torch.load(x, map_location='cpu')['deltas'] for x in data_files]
     deltas = torch.cat(deltas)
-    magnitudes = [torch.load(x, map_location='cpu')['magnitudes'] for x in data_files]
+    
+    magnitudes = [torch.load(x, map_location='cpu')['magnitudes'] 
+        for x in data_files]
     magnitudes = torch.cat(magnitudes)
     epsilons = torch.tensor(list(ATTRS.values()))
 
@@ -477,11 +568,15 @@ def eval_files(log_files, data_files, args):
     # Normalized component contributions
     norm_comps = comps / magnitudes.unsqueeze(1)
     assert torch.allclose(norm_comps.sum(1), torch.ones_like(magnitudes))
-    means, stds = norm_comps.mean(0), norm_comps.std(0)
 
-    for (attr, limit), mean, std in zip(ATTRS.items(), means, stds):
-        info += f'Attribute-{attr}:{mean:2.3f}±{std:2.3f}\n'
-
+    failed, ranking, pvals = get_ranking(norm_comps)
+    if not failed:
+        info = 'importance-order:' + '>'.join(ranking) + '\n'
+        info += 'order-pvals:' + ','.join([str(x) for x in pvals])
+    else:
+        info = 'importance-order:' + 'NoneFound'
+        info += 'order-pvals:' + 'Undefined'
+    
     print_to_log(info, args.final_results)
     args.LOGGER.info(f'Saved all results to {args.final_results}')
 
