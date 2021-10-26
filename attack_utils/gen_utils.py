@@ -490,7 +490,6 @@ def eval_files(log_files, data_files, args):
                 break
 
         if not failed:
-            print('Preliminary ranking checked')
             # Check the last comparison
             print('Checking last comparison')
             k1, k2 = list(data_copy.keys())
@@ -510,6 +509,7 @@ def eval_files(log_files, data_files, args):
         
         # Get the p-values
         if not failed:
+            print('Preliminary ranking:', ranking)
             pvals = []
             for idx in range(n_attr-1):
                 winner = ranking[idx]
