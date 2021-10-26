@@ -472,7 +472,7 @@ def eval_files(log_files, data_files, args):
                 argsort = np.argsort(-curr_data, axis=1)
                 # Now we compute the amount of votes for each attribute
                 votes = np.zeros(n_attrs)
-                weights = np.arange(n_attrs).reshape(-1, n_attrs)
+                weights = 2 * np.arange(n_attrs).reshape(-1, n_attrs)
                 for curr_attr in range(n_attrs):
                     where_curr_attr = argsort == curr_attr
                     weight_votes = where_curr_attr * weights
