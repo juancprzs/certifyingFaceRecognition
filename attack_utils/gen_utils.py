@@ -500,6 +500,7 @@ def eval_files(log_files, data_files, args):
                 print('Last comparison failed. No ranking will be returned')
                 failed = True
             else: # We can reject equality hypothesis
+                print('Last comparison checked')
                 last_pval = wilcoxon(x=data[k1], y=data[k2], 
                     alternative='greater').pvalue
                 if last_pval < alpha: # reject hypothesis k1 is smaller than k2
@@ -516,6 +517,7 @@ def eval_files(log_files, data_files, args):
                 print(f'Comparing attributes: {winner} vs. {runner_up}')
                 pval = wilcoxon(x=data[winner], y=data[runner_up], 
                     alternative='greater').pvalue
+                print(pval)
                 if pval > alpha:
                     print('Ranking check failed. No ranking will be returned.')
                     failed = True
@@ -556,7 +558,7 @@ def eval_files(log_files, data_files, args):
         data_files)
     deltas = [torch.load(x, map_location='cpu')['deltas'] for x in data_files]
     deltas = torch.cat(deltas)
-    
+
     magnitudes = [torch.load(x, map_location='cpu')['magnitudes'] 
         for x in data_files]
     magnitudes = torch.cat(magnitudes)
