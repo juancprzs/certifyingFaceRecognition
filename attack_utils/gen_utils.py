@@ -478,6 +478,8 @@ def eval_files(log_files, data_files, args):
                     weight_votes = where_curr_attr * weights
                     votes[curr_attr] = weight_votes.sum()
                 
+                print(data_copy.keys())
+                print(votes)
                 winner_idx = votes.argmin()
                 winner_attr = list(data_copy.keys())[winner_idx]
                 # Append the winner to the ranking list
