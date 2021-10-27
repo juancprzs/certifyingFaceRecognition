@@ -474,7 +474,8 @@ def eval_files(log_files, data_files, args):
                 votes = np.zeros(n_attrs)
                 weights = np.arange(1, n_attrs+1).reshape(-1, n_attrs)
                 weights = 1 - curr_data
-                import pdb; pdb.set_trace()
+                weights = np.take_along_axis(weights, argsort, axis=1)
+                # import pdb; pdb.set_trace()
                 for curr_attr in range(n_attrs):
                     where_curr_attr = argsort == curr_attr
                     weight_votes = where_curr_attr * weights
