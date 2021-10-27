@@ -499,6 +499,7 @@ def eval_files(log_files, data_files, args):
             k1, k2 = list(data_copy.keys())
             pval = wilcoxon(x=data[k1], y=data[k2], 
                 alternative='two-sided').pvalue
+            print('Last comparison pvalue:', pval)
             if pval > alpha:
                 print('Last comparison failed. No ranking will be returned')
                 failed = True
