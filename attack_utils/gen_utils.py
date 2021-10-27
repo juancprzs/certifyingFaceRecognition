@@ -578,7 +578,7 @@ def eval_files(log_files, data_files, args):
     failed, ranking, pvals = get_ranking(norm_comps)
     if not failed:
         info = 'importance-order:' + '>'.join(ranking) + '\n'
-        info += 'order-pvals:' + ','.join([str(x) for x in pvals])
+        info += 'order-pvals:' + ','.join([f'{x:3.2E}' for x in pvals])
     else:
         info = 'importance-order:' + 'NoneFound'
         info += 'order-pvals:' + 'Undefined'
