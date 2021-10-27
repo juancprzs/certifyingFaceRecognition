@@ -501,8 +501,8 @@ def eval_files(log_files, data_files, args):
                 alternative='two-sided').pvalue
             print('Last comparison pvalue:', pval)
             if pval > alpha:
-                print('Last comparison failed. No ranking will be returned')
-                failed = True
+                print('Last comparison failed. Last two values may be equal')
+                ranking.extend([k1, k2])
             else: # We can reject equality hypothesis
                 print('Last comparison checked')
                 last_pval = wilcoxon(x=data[k1], y=data[k2], 
@@ -519,14 +519,8 @@ def eval_files(log_files, data_files, args):
             for idx in range(n_attr-1):
                 winner = ranking[idx]
                 runner_up = ranking[idx+1]
-                print(f'Comparing attributes: {winner} vs. {runner_up}')
                 pval = wilcoxon(x=data[winner], y=data[runner_up], 
                     alternative='greater').pvalue
-                print(pval)
-                if pval > alpha:
-                    print('Ranking check failed. No ranking will be returned.')
-                    failed = True
-                    break
                 
                 pvals.append(pval)
 
@@ -534,6 +528,7 @@ def eval_files(log_files, data_files, args):
             ranking, pvals = None, None
         
         return failed, ranking, pvals
+    
     # Evaluate attack successes
     print(f'Evaluating based on these {len(log_files)} files: ', log_files)
     tot_instances, tot_successes, tot_magnitudes = 0, 0, 0.
