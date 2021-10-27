@@ -441,7 +441,7 @@ def save_results(results, deltas, successes, magnitudes, num_chunk, args):
 
 
 def eval_files(log_files, data_files, args):
-    def get_ranking(norm_comps):
+    def get_ranking(norm_comps, alpha=0.01):
         data = { attr_name : norm_comps[:, idx].numpy() 
             for idx, attr_name in enumerate(ATTRS.keys()) }
         failed = False
@@ -449,7 +449,6 @@ def eval_files(log_files, data_files, args):
         attr_names = list(data.keys())
         data_copy = dict(data)
         ranking = []
-        alpha = 0.01
         for _ in range(n_attr-2):
             n_attrs = len(data_copy)
             # Perform Friedman's test
@@ -605,8 +604,11 @@ def eval_files(log_files, data_files, args):
     plt.title('Accuracy \\textit{vs.} perturbation budget', fontsize=20)
 
     figname = osp.join(args.output_dir, 'acc_vs_pert.png')
-    plt.savefig(figname, dpi=200)
-    args.LOGGER.info(f'Saved figure to {figname}')
+    try:
+        plt.savefig(figname, dpi=200)
+        args.LOGGER.info(f'Saved figure to {figname}')
+    except:
+        args.LOGGER.info(f'Unable to save figure to {figname}. LaTeX not found')
 
 
 
