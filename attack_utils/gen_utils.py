@@ -473,11 +473,13 @@ def eval_files(log_files, data_files, args):
                 # Now we compute the amount of votes for each attribute
                 votes = np.zeros(n_attrs)
                 weights = 2 * np.arange(1, n_attrs+1).reshape(-1, n_attrs)
+                import pdb; pdb.set_trace()
                 for curr_attr in range(n_attrs):
                     where_curr_attr = argsort == curr_attr
                     weight_votes = where_curr_attr * weights
                     votes[curr_attr] = weight_votes.sum()
                 
+                import pdb; pdb.set_trace()
                 print(data_copy.keys())
                 print(votes)
                 winner_idx = votes.argmin()
