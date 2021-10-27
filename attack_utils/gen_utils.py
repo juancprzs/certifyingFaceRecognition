@@ -441,7 +441,7 @@ def save_results(results, deltas, successes, magnitudes, num_chunk, args):
 
 
 def eval_files(log_files, data_files, args):
-    def get_ranking(norm_comps, alpha=0.01):
+    def get_ranking(norm_comps, alpha=0.05):
         data = { attr_name : norm_comps[:, idx].numpy() 
             for idx, attr_name in enumerate(ATTRS.keys()) }
         failed = False
@@ -580,7 +580,7 @@ def eval_files(log_files, data_files, args):
         info = 'importance-order:' + '>'.join(ranking) + '\n'
         info += 'order-pvals:' + ','.join([f'{x:3.2E}' for x in pvals])
     else:
-        info = 'importance-order:' + 'NoneFound'
+        info = 'importance-order:' + 'NoneFound\n'
         info += 'order-pvals:' + 'Undefined'
     
     print_to_log(info, args.final_results)
