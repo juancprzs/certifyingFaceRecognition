@@ -449,7 +449,7 @@ def eval_files(log_files, data_files, args):
         attr_names = list(data.keys())
         data_copy = dict(data)
         ranking = []
-        alpha = 1e-3
+        alpha = 0.01
         for _ in range(n_attr-2):
             n_attrs = len(data_copy)
             # Perform Friedman's test
