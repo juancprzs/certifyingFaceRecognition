@@ -82,10 +82,11 @@ if __name__ == "__main__":
 
     # Loading sigma for smoothing
     if args.anisotropic_sigma:
+        print('Using anisotropic sigma')
         # Read the inverse of the matrix that parameterizes the ellipse
         red_ellipse_mat_inv = get_all_matrices()[6]
         # This (the *inverse) is equivalent to the sigma for smoothing
-        sigma = torch.diag(red_ellipse_mat_inv).to(device)
+        sigma = red_ellipse_mat_inv.to(device)
         # sigma = torch.load(args.anisotropic_sigma_path).to(device)
         # Scale matrix by (scalar) sigma argument
         sigma = args.sigma * sigma
