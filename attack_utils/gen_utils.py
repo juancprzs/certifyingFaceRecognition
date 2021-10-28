@@ -598,8 +598,8 @@ def eval_files(log_files, data_files, args):
         plt.title('Accuracy \\textit{vs.} perturbation budget', fontsize=20)
 
         figname = osp.join(args.output_dir, 'acc_vs_pert.png')
-            plt.savefig(figname, dpi=200)
-            args.LOGGER.info(f'Saved figure to {figname}')
+        plt.savefig(figname, dpi=200)
+        args.LOGGER.info(f'Saved figure to {figname}')
     except:
         args.LOGGER.info(f'Unable to save figure to {figname}. LaTeX not found')
 
