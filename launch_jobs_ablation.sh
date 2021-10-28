@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --partition=batch
-#SBATCH --array=0-249:25
-#SBATCH -J fabt_it10_rest10_targ20
-#SBATCH -o logs/fabt_it10_rest10_targ20.%J.out
-#SBATCH -e logs/fabt_it10_rest10_targ20.%J.err
+#SBATCH --array=0-249
+#SBATCH -J fabt_abl_onlyAge
+#SBATCH -o logs/fabt_abl_onlyAge.%J.out
+#SBATCH -e logs/fabt_abl_onlyAge.%J.err
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
@@ -15,12 +15,13 @@
 
 source venv/bin/activate
 
+FRS_METHOD=insightface
+N_EMBS=5000
+EXP_DIR=FABT_METHOD_$FRS_METHOD-N_$N_EMBS-onlyAge
+
 python main_attack.py \
---chunks 250 --num-chunk ${SLURM_ARRAY_TASK_ID} \
---load-embs --embs-file embs.pth \
---attack-type fab-t \
---restarts 10 \
---iters 10 \
---n-target-classes 20 \
---output-dir fabt_it10_rest10_targ20_attrOnlyAge \
+--attack-type fab-t --load-embs --num-chunk ${SLURM_ARRAY_TASK_ID} \
+--load-n-embs $N_EMBS \
+--face-recog-method $FRS_METHOD \
+--output-dir $EXP_DIR \
 --attrs2drop eyeglasses gender pose smile
