@@ -5,9 +5,6 @@ from time import time
 import os.path as osp
 import torch.nn.functional as F
 from scipy.stats import friedmanchisquare, wilcoxon
-
-import matplotlib
-matplotlib.rcParams['text.usetex'] = True
 import matplotlib.pyplot as plt
 
 from autoattack import AutoAttack
@@ -480,8 +477,6 @@ def eval_files(log_files, data_files, args):
                     weight_votes = where_curr_attr * weights
                     votes[curr_attr] = weight_votes.sum()
                 
-                print(data_copy.keys())
-                print(votes)
                 winner_idx = votes.argmin()
                 winner_attr = list(data_copy.keys())[winner_idx]
                 # Append the winner to the ranking list
@@ -593,19 +588,20 @@ def eval_files(log_files, data_files, args):
     # Normalize the counts
     norm_counts = counts / tot_instances
     # Plot everything
-    plt.plot(lins, norm_counts)
-    plt.grid(True)
-    plt.xlabel(r'$\|\delta\|_{\Sigma,2}$', fontsize=16)
-    plt.ylabel(r'Accuracy', fontsize=16)
-    plt.title('Accuracy \\textit{vs.} perturbation budget', fontsize=20)
-
-    figname = osp.join(args.output_dir, 'acc_vs_pert.png')
     try:
-        plt.savefig(figname, dpi=200)
-        args.LOGGER.info(f'Saved figure to {figname}')
+        import matplotlib
+        matplotlib.rcParams['text.usetex'] = True
+        plt.plot(lins, norm_counts)
+        plt.grid(True)
+        plt.xlabel(r'$\|\delta\|_{\Sigma,2}$', fontsize=16)
+        plt.ylabel(r'Accuracy', fontsize=16)
+        plt.title('Accuracy \\textit{vs.} perturbation budget', fontsize=20)
+
+        figname = osp.join(args.output_dir, 'acc_vs_pert.png')
+            plt.savefig(figname, dpi=200)
+            args.LOGGER.info(f'Saved figure to {figname}')
     except:
         args.LOGGER.info(f'Unable to save figure to {figname}. LaTeX not found')
-
 
 
 def get_all_matrices(attrs2drop=[], scale_factor=1.0):
