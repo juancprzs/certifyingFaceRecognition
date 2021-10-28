@@ -17,7 +17,7 @@ source venv/bin/activate
 
 FRS_METHOD=insightface
 N_EMBS=5000
-EXP_DIR=FABT_METHOD_$FRS_METHOD-N_$N_EMBS-onlyAge
+EXP_DIR=FABT_onlyAge_METHOD_$FRS_METHOD-N_$N_EMBS
 
 python main_attack.py \
 --attack-type fab-t --load-embs --num-chunk ${SLURM_ARRAY_TASK_ID} \
