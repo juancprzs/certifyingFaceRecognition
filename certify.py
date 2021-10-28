@@ -30,8 +30,8 @@ if __name__ == "__main__":
         "in isotropic_dd and ancer"
     )
     parser.add_argument(
-        "--anisotropic-sigma-path", type=str, default=None,
-        help="Path to Anisotropic Sigma that can be used in certification"
+        "--anisotropic-sigma", action='store_true', default=False,
+        help="Whether to use Anisotropic Sigma for certification"
     )
 
     # dataset options
@@ -68,6 +68,7 @@ if __name__ == "__main__":
 
     # Load the matrix of directions
     dirs = get_all_matrices()[3].T
+
     device = dirs.device
     # Instantiate the wrapped model
     model = WrappedModel(dirs, args.face_recog_model, n_embs=args.load_n_embs,
@@ -80,10 +81,16 @@ if __name__ == "__main__":
     certificate = L2Certificate(1, device=device)
 
     # Loading sigma for smoothing
-    if args.anisotropic_sigma_path is None:
-        sigma = torch.tensor([args.sigma], device=device)
+    if args.anisotropic_sigma:
+        # Read the inverse of the matrix that parameterizes the ellipse
+        red_ellipse_mat_inv = get_all_matrices()[6]
+        # This (the *inverse) is equivalent to the sigma for smoothing
+        sigma = torch.diag(red_ellipse_mat_inv).to(device)
+        # sigma = torch.load(args.anisotropic_sigma_path).to(device)
+        # Scale matrix by (scalar) sigma argument
+        sigma = args.sigma * sigma
     else:
-        sigma = torch.load(args.anisotropic_sigma_path).to(device)
+        sigma = torch.tensor([args.sigma], device=device)
 
     # prepare output file
     parent_dir = osp.dirname(args.outfile)
