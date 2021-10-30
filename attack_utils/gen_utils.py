@@ -30,7 +30,7 @@ DEVICE = torch.device('cuda')
 OPTIMS = ['Adam', 'SGD', 'RMSProp']
 FRS_METHODS = [
     'insightface', # This means ArcFace
-    'facenet', # This means FaceNet trained on CASIA-webface (the default)
+    'facenet', # This means FaceNet trained on CASIA-webface (the default dataset)
     'facenet-vggface2' # This means FaceNet trained on VGGFace2
 ]
 KWARGS = { 'latent_space_type' : LAT_SPACE }

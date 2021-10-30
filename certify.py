@@ -9,7 +9,8 @@ from tqdm import tqdm
 from smoothing.smooth import Smooth
 from smoothing.certificate import L2Certificate
 from models.smoothing_model import WrappedModel
-from attack_utils.gen_utils import get_latent_codes, get_all_matrices
+from attack_utils.gen_utils import (get_latent_codes, get_all_matrices, 
+    FRS_METHODS)
 
 
 if __name__ == "__main__":
@@ -17,7 +18,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--face-recog-model", required=True,
-        choices=["insightface", "facenet"],
+        choices=FRS_METHODS,
         type=str, help="type of model to load for face recognition"
     )
     parser.add_argument(
