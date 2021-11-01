@@ -2,9 +2,9 @@
 #SBATCH -N 1
 #SBATCH --partition=batch
 #SBATCH --array=0-249
-#SBATCH -J fabt_abl_onlyAge_insight_100k
-#SBATCH -o logs/fabt_abl_onlyAge_insight_100k.%J.out
-#SBATCH -e logs/fabt_abl_onlyAge_insight_100k.%J.err
+#SBATCH -J pgd_abl_onlyAge_insight_100k
+#SBATCH -o logs/pgd_abl_onlyAge_insight_100k.%J.out
+#SBATCH -e logs/pgd_abl_onlyAge_insight_100k.%J.err
 #SBATCH --time=4:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
