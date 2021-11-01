@@ -25,4 +25,3 @@ python main_attack.py \
 --face-recog-method $FRS_METHOD \
 --output-dir $EXP_DIR
 
-python main_attack.py --eval-files --output-dir $EXP_DIR
