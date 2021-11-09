@@ -561,9 +561,9 @@ def eval_files(log_files, data_files, args):
 
     # Individual components
     comps = deltas**2 / (epsilons**2).unsqueeze(0)
-    assert torch.allclose(magnitudes, comps.sum(1))
     # Normalized component contributions
     norm_comps = comps / magnitudes.unsqueeze(1)
+    assert torch.allclose(magnitudes, comps.sum(1))
     assert torch.allclose(norm_comps.sum(1), torch.ones_like(magnitudes))
 
     failed, ranking, pvals = get_ranking(norm_comps)
