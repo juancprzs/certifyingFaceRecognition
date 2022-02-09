@@ -1,5 +1,5 @@
-# Paper \#622
-This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*, paper ID 622, currently under anonymous review for CVPR22.
+# Towards Assessing and Characterizing the Semantic Robustness of Face Recognition
+This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*.
 
 This README file shows how to use the implementation.
 Unfortunately, running the assessments we show in our paper requires large amounts of computation.
