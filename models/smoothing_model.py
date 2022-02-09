@@ -35,7 +35,7 @@ class WrappedModel(nn.Module):
         # Computing original embeddings for these identities.
         if load_embs:
             if embs_file is None:
-                filename = f'embs_1M_{face_recog}.pth'
+                filename = f'embs_{face_recog}.pth'
                 read_from = osp.join('embeddings', filename)
             else:
                 read_from = embs_file

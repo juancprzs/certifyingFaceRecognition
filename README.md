@@ -1,196 +1,304 @@
-# InterFaceGAN - Interpreting the Latent Space of GANs for Semantic Face Editing
+# Paper \#622
+This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*, paper ID 622, currently under anonymous review for CVPR22.
 
-![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg?style=plastic)
-![pytorch 1.1.0](https://img.shields.io/badge/pytorch-1.1.0-green.svg?style=plastic)
-![TensorFlow 1.12.2](https://img.shields.io/badge/tensorflow-1.12.2-green.svg?style=plastic)
-![sklearn 0.21.2](https://img.shields.io/badge/sklearn-0.21.2-green.svg?style=plastic)
+This README file shows how to use the implementation.
+Unfortunately, running the assessments we show in our paper requires large amounts of computation.
+Thus, we here we show a simplified version of our results.
+Even in this simplified setup, a GPU is required, and computation time can be significant.
 
-![image](./docs/assets/teaser.jpg)
-**Figure:** *High-quality facial attributes editing results with InterFaceGAN.*
+In this repo we show how to (0) generate the identities we will attack, (1) run PGD attacks, (2) run FAB attacks, (3) run Isotropic certification, and (4) run Anisotropic certification.
+The computation times for these examples are, respectively: 10, 10, 15, 5, and 5 minutes.
+These numbers were observed in an Nvidia GeForce RTX 3090.
+Please bear these numbers in mind when running this code.
 
-In this repository, we propose an approach, termed as InterFaceGAN, for semantic face editing. Specifically, InterFaceGAN is capable of turning an unconditionally trained face synthesis model to controllable GAN by interpreting the very first latent space and finding the hidden semantic subspaces.
+*Note:* given the computational requirements of our assessment, when running the computations, in practice, everything is run with a scheduler (like SLURM).
+That is to say, all of our scripts are parameterized so that you can easily control them via standard scheduler-like scripts.
 
-[[Paper (CVPR)](https://arxiv.org/pdf/1907.10786.pdf)]
-[[Paper (TPAMI)](https://arxiv.org/pdf/2005.09635.pdf)]
-[[Project Page](https://genforce.github.io/interfacegan/)]
-[[Demo](https://www.youtube.com/watch?v=uoftpl3Bj6w)]
-[[Colab](https://colab.research.google.com/github/genforce/interfacegan/blob/master/docs/InterFaceGAN.ipynb)]
-
-## How to Use
-
-Pick up a model, pick up a boundary, pick up a latent code, and then EDIT!
-
+# Setup
+## Get Anaconda
 ```bash
-# Before running the following code, please first download
-# the pre-trained ProgressiveGAN model on CelebA-HQ dataset,
-# and then place it under the folder ".models/pretrain/".
-LATENT_CODE_NUM=10
-python edit.py \
-    -m pggan_celebahq \
-    -b boundaries/pggan_celebahq_smile_boundary.npy \
-    -n "$LATENT_CODE_NUM" \
-    -o results/pggan_celebahq_smile_editing
+wget https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh
+bash Anaconda3-2020.07-Linux-x86_64.sh
 ```
 
-## GAN Models Used (Prior Work)
-
-Before going into details, we would like to first introduce the two state-of-the-art GAN models used in this work, which are ProgressiveGAN (Karras *el al.*, ICLR 2018) and StyleGAN (Karras *et al.*, CVPR 2019). These two models achieve high-quality face synthesis by learning unconditional GANs. For more details about these two models, please refer to the original papers, as well as the official implementations.
-
-ProgressiveGAN:
-  [[Paper](https://arxiv.org/pdf/1710.10196.pdf)]
-  [[Code](https://github.com/tkarras/progressive_growing_of_gans)]
-
-StyleGAN:
-  [[Paper](https://arxiv.org/pdf/1812.04948.pdf)]
-  [[Code](https://github.com/NVlabs/stylegan)]
-
-## Code Instruction
-
-### Generative Models
-
-A GAN-based generative model basically maps the latent codes (commonly sampled from high-dimensional latent space, such as standart normal distribution) to photo-realistic images. Accordingly, a base class for generator, called `BaseGenerator`, is defined in `models/base_generator.py`. Basically, it should contains following member functions:
-
-- `build()`: Build a pytorch module.
-- `load()`: Load pre-trained weights.
-- `convert_tf_model()` (Optional): Convert pre-trained weights from tensorflow model.
-- `sample()`: Randomly sample latent codes. This function should specify what kind of distribution the latent code is subject to.
-- `preprocess()`: Function to preprocess the latent codes before feeding it into the generator.
-- `synthesize()`: Run the model to get synthesized results (or any other intermediate outputs).
-- `postprocess()`: Function to postprocess the outputs from generator to convert them to images.
-
-We have already provided following models in this repository:
-
-- ProgressiveGAN:
-  - A clone of official tensorflow implementation: `models/pggan_tf_official/`. This clone is only used for converting tensorflow pre-trained weights to pytorch ones. This conversion will be done automitally when the model is used for the first time. After that, tensorflow version is not used anymore.
-  - Pytorch implementation of official model (just for inference): `models/pggan_generator_model.py`.
-  - Generator class derived from `BaseGenerator`: `models/pggan_generator.py`.
-  - Please download the official released model trained on CelebA-HQ dataset and place it in folder `models/pretrain/`.
-- StyleGAN:
-  - A clone of official tensorflow implementation: `models/stylegan_tf_official/`. This clone is only used for converting tensorflow pre-trained weights to pytorch ones. This conversion will be done automitally when the model is used for the first time. After that, tensorflow version is not used anymore.
-  - Pytorch implementation of official model (just for inference): `models/stylegan_generator_model.py`.
-  - Generator class derived from `BaseGenerator`: `models/stylegan_generator.py`.
-  - Please download the official released models trained on CelebA-HQ dataset and FF-HQ dataset and place them in folder `models/pretrain/`.
-  - Support synthesizing images from $\mathcal{Z}$ space, $\mathcal{W}$ space, and extended $\mathcal{W}$ space (18x512).
-  - Set truncation trick and noise randomization trick in `models/model_settings.py`. Among them, `STYLEGAN_RANDOMIZE_NOISE` is highly recommended to set as `False`. `STYLEGAN_TRUNCATION_PSI = 0.7` and `STYLEGAN_TRUNCATION_LAYERS = 8` are inherited from official implementation. Users can customize their own models. NOTE: These three settings will NOT affect the pre-trained weights.
-- Customized model:
-  - Users can do experiments with their own models by easily deriving new class from `BaseGenerator`.
-  - Before used, new model should be first registered in `MODEL_POOL` in file `models/model_settings.py`.
-
-### Utility Functions
-
-We provide following utility functions in `utils/manipulator.py` to make InterFaceGAN much easier to use.
-
-- `train_boundary()`: This function can be used for boundary searching. It takes pre-prepared latent codes and the corresponding attributes scores as inputs, and then outputs the normal direction of the separation boundary. Basically, this goal is achieved by training a linear SVM. The returned vector can be further used for semantic face editing.
-- `project_boundary()`: This function can be used for conditional manipulation. It takes a primal direction and other conditional directions as inputs, and then outputs a new normalized direction. Moving latent code along this new direction will manipulate the primal attribute yet barely affect the conditioned attributes. NOTE: For now, at most two conditions are supported.
-- `linear_interpolate()`: This function can be used for semantic face editing. It takes a latent code and the normal direction of a particular semantic boundary as inputs, and then outputs a collection of manipulated latent codes with linear interpolation. These interpolation can be used to see how the synthesis will vary if moving the latent code along the given direction.
-
-### Tools
-
-- `generate_data.py`: This script can be used for data preparation. It will generate a collection of syntheses (images are saved for further attribute prediction) as well as save the input latent codes.
-
-- `train_boundary.py`: This script can be used for boundary searching.
-
-- `edit.py`: This script can be usd for semantic face editing.
-
-## Usage
-
-We take ProgressiveGAN model trained on CelebA-HQ dataset as an instance.
-
-### Prepare data
-
+## Download StyleGAN's weights
+From Nvidia's official repository, you can go to [this link](https://drive.google.com/drive/folders/1MASQyN5m0voPcx7-9K0r5gObhvvPups7), download the file `karras2019stylegan-ffhq-1024x1024.pkl`, and move it to `models/pretrain/`.
+Run a checksum to ensure you have the right file:
 ```bash
-NUM=10000
-python generate_data.py -m pggan_celebahq -o data/pggan_celebahq -n "$NUM"
+md5sum models/pretrain/karras2019stylegan-ffhq-1024x1024.pkl 
 ```
+Which should return `5a20ed46ea6494a9e969db2f6b97a88a`.
+This is a `pkl` file, which the code converts to PyTorch weights the first time the code is run.
+On some machines, it is likely that the first time the code is run the convertion works fine, but the code exists for a (yet) unknown reason.
+If this happens in your case, please simply run the code again.
 
-### Predict Attribute Score
+## Download Face Recognition Models' weights
+We use three FRMs: ArcFace, FaceNet^C and FaceNet^V. 
+You only need to download the weights for the first one (ArcFace), as the weights for the other two are automatically downloaded when running the scripts.
+For ArcFace's weights, we use the weights provided by the *InsightFace* public repo, available in [this link](https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch#model-zoo).
 
-Get your own predictor for attribute `$ATTRIBUTE_NAME`, evaluate on all generated images, and save the inference results as `data/pggan_celebahq/"$ATTRIBUTE_NAME"_scores.npy`. NOTE: The save results should be with shape `($NUM, 1)`.
-
-### Search Semantic Boundary
-
+To get the weights, please go to [InsightFace's OneDrive link](https://onedrive.live.com/?authkey=%21AFZjr283nwZHqbA&id=4A83B6B633B029CC%215577&cid=4A83B6B633B029CC), go to the directory `ms1mv3_arcface_r50_fp16`, download the `backbone.pth` file, and move it to the directory `weights/ms1mv3_arcface_r50/`.
+Run a checksum to be sure you got the right file:
 ```bash
-python train_boundary.py \
-    -o boundaries/pggan_celebahq_"$ATTRIBUTE_NAME" \
-    -c data/pggan_celebahq/z.npy \
-    -s data/pggan_celebahq/"$ATTRIBUTE_NAME"_scores.npy
+md5sum weights/ms1mv3_arcface_r50/backbone.pth
+```
+Which should return `b9b1f8b29151d5564f1be869cc26bd23`.
+
+## Install sutff
+```bash
+conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia
+conda install tqdm
+pip install facenet-pytorch
 ```
 
-### Compute Conditional Boundary (Optional)
-
-This step is optional. It depends on whether conditional manipulation is needed. Users can use function `project_boundary()` in file `utils/manipulator.py` to compute the projected direction.
-
-## Boundaries Description
-
-We provided following boundaries in folder `boundaries/`. The boundaries can be more accurate if stronger attribute predictor is used.
-
-- ProgressiveGAN model trained on CelebA-HQ dataset:
-  - Single boundary:
-    - `pggan_celebahq_pose_boundary.npy`: Pose.
-    - `pggan_celebahq_smile_boundary.npy`: Smile (expression).
-    - `pggan_celebahq_age_boundary.npy`: Age.
-    - `pggan_celebahq_gender_boundary.npy`: Gender.
-    - `pggan_celebahq_eyeglasses_boundary.npy`: Eyeglasses.
-    - `pggan_celebahq_quality_boundary.npy`: Image quality.
-  - Conditional boundary:
-    - `pggan_celebahq_age_c_gender_boundary.npy`: Age (conditioned on gender).
-    - `pggan_celebahq_age_c_eyeglasses_boundary.npy`: Age (conditioned on eyeglasses).
-    - `pggan_celebahq_age_c_gender_eyeglasses_boundary.npy`: Age (conditioned on gender and eyeglasses).
-    - `pggan_celebahq_gender_c_age_boundary.npy`: Gender (conditioned on age).
-    - `pggan_celebahq_gender_c_eyeglasses_boundary.npy`: Gender (conditioned on eyeglasses).
-    - `pggan_celebahq_gender_c_age_eyeglasses_boundary.npy`: Gender (conditioned on age and eyeglasses).
-    - `pggan_celebahq_eyeglasses_c_age_boundary.npy`: Eyeglasses (conditioned on age).
-    - `pggan_celebahq_eyeglasses_c_gender_boundary.npy`: Eyeglasses (conditioned on gender).
-    - `pggan_celebahq_eyeglasses_c_age_gender_boundary.npy`: Eyeglasses (conditioned on age and gender).
-- StyleGAN model trained on CelebA-HQ dataset:
-  - Single boundary in $\mathcal{Z}$ space:
-    - `stylegan_celebahq_pose_boundary.npy`: Pose.
-    - `stylegan_celebahq_smile_boundary.npy`: Smile (expression).
-    - `stylegan_celebahq_age_boundary.npy`: Age.
-    - `stylegan_celebahq_gender_boundary.npy`: Gender.
-    - `stylegan_celebahq_eyeglasses_boundary.npy`: Eyeglasses.
-  - Single boundary in $\mathcal{W}$ space:
-    - `stylegan_celebahq_pose_w_boundary.npy`: Pose.
-    - `stylegan_celebahq_smile_w_boundary.npy`: Smile (expression).
-    - `stylegan_celebahq_age_w_boundary.npy`: Age.
-    - `stylegan_celebahq_gender_w_boundary.npy`: Gender.
-    - `stylegan_celebahq_eyeglasses_w_boundary.npy`: Eyeglasses.
-
-- StyleGAN model trained on FF-HQ dataset:
-  - Single boundary in $\mathcal{Z}$ space:
-    - `stylegan_ffhq_pose_boundary.npy`: Pose.
-    - `stylegan_ffhq_smile_boundary.npy`: Smile (expression).
-    - `stylegan_ffhq_age_boundary.npy`: Age.
-    - `stylegan_ffhq_gender_boundary.npy`: Gender.
-    - `stylegan_ffhq_eyeglasses_boundary.npy`: Eyeglasses.
-  - Conditional boundary in $\mathcal{Z}$ space:
-    - `stylegan_ffhq_age_c_gender_boundary.npy`: Age (conditioned on gender).
-    - `stylegan_ffhq_age_c_eyeglasses_boundary.npy`: Age (conditioned on eyeglasses).
-    - `stylegan_ffhq_eyeglasses_c_age_boundary.npy`: Eyeglasses (conditioned on age).
-    - `stylegan_ffhq_eyeglasses_c_gender_boundary.npy`: Eyeglasses (conditioned on gender).
-  - Single boundary in $\mathcal{W}$ space:
-    - `stylegan_ffhq_pose_w_boundary.npy`: Pose.
-    - `stylegan_ffhq_smile_w_boundary.npy`: Smile (expression).
-    - `stylegan_ffhq_age_w_boundary.npy`: Age.
-    - `stylegan_ffhq_gender_w_boundary.npy`: Gender.
-    - `stylegan_ffhq_eyeglasses_w_boundary.npy`: Eyeglasses.
-
-## BibTeX
-
-```bibtex
-@inproceedings{shen2020interpreting,
-  title     = {Interpreting the Latent Space of GANs for Semantic Face Editing},
-  author    = {Shen, Yujun and Gu, Jinjin and Tang, Xiaoou and Zhou, Bolei},
-  booktitle = {CVPR},
-  year      = {2020}
-}
+## Create some directory
+Run
+```bash
+mkdir embeddings
 ```
 
-```bibtex
-@article{shen2020interfacegan,
-  title   = {InterFaceGAN: Interpreting the Disentangled Face Representation Learned by GANs},
-  author  = {Shen, Yujun and Yang, Ceyuan and Tang, Xiaoou and Zhou, Bolei},
-  journal = {TPAMI},
-  year    = {2020}
-}
+# Generate latent codes and images
+We need latent codes in W space.
+Each latent code corresponds to one image/identity.
+For practical purposes, we only generate 5000 latent codes in this README, while in the paper, we generated up to 1M identities.
+This factor can simply be changed by modifying the `NUM` variable.
+Run the following lines:
+```bash
+OUTDIR=data/stylegan_ffhq_1M;
+NUM=5000; 
+rm -rf $OUTDIR; CUDA_VISIBLE_DEVICES=0 python generate_data.py \
+-m stylegan_ffhq \
+-o "$OUTDIR" \
+-n "$NUM"
 ```
+Running this code should take ~10 minutes, and requires 8.2 GB of disk. 
+Naturally, running this code for 1M identities would take remarkably more time, so we do not show this example.
+
+After running, this script will have populated the directory `$OUTDIR` (*i.e.* `data/stylegan_ffhq_1M`) with four files and one directory. 
+We care about two items, in particular:
+1. `ims` directory: filled with the images corresponding to the 5k identities.
+2. `w.npy`: a numpy file containing the array of W latent codes corresponding to the 5k identities. 
+This is a 5000 x 512 array, representing 5k vectors of dimension 512. 
+Check this in a Python console with 
+```python
+import numpy as np
+np.load('data/stylegan_ffhq_1M/w.npy').shape
+```
+
+With these embeddings, we can now run attacks.
+
+
+# PGD attacks
+## Running the attack
+Now we can conduct a PGD attack with 5 restarts and 5 iterations by running a command of this sort.
+```bash
+frs_method=insightface; 
+python main_attack.py \
+--embs-file embeddings/embs_"$frs_method".pth \
+--restarts 5 \
+--iters 5 \
+--output-dir pgd_attack_"$frs_method" \
+--face-recog-method $frs_method \
+--load-n-embs "$NUM" \
+--attack-type manual \
+--chunks 250 \
+--num-chunk 0
+```
+Now we explain each flag:
+* `--embs-file`: this script will first compute the embeddings (from the Face Recognition Model), and save them at the value passed to the `--embs-file` flag (*i.e.* `embeddings/embs_"$frs_method".pth` in this case).
+This procedure should take ~3 minutes, while the rest of the time spent (about an extra minute) is spent on actually conducting the attack. 
+This `.pth` file will be useful for running other experiments in the future, since these embeddings do not have to be recomputed.
+For loading these embeddings, instead of computing them, we just need to add the `--load-embs` flag.
+
+* `--restarts` and `--iters`: the restarts and iterations given to PGD are controlled via these flags.
+
+* `--output-dir`: the name of the directory in which the results will be saved.
+
+* `--face-recog-method`: name of the Face Recognition Model to use. 
+Can be one of `insightface`, `facenet`, and `facenet-vggface2`.
+These options, correspond, respectively, to ArcFace, FaceNet^C and FaceNet^V (in the paper's convention).
+
+* `--load-n-embs`: number of embeddings to load from the file `--embs-file`. 
+In case one wants to only consider a subset of the total embeddings.
+
+* `--attack-type`: can be one of `manual` (which means PGD attack) or `fab-t` (which means the targeted version of the FAB attack).
+These are the two attacks we report in the paper.
+
+* `--chunks`: to ease parallelization of the computation, this script allows for chunking: it breaks the set of instances being attacked into chunks, and attacks each chunk separately.
+The amount of chunks is controlled precisely by the `--chunks` parameter. 
+
+* `--num-chunk`: for parallelization, *which* chunk is attacked is controlled by the `--num-chunk` parameter. 
+If no number is passed to the `--num-chunk` parameter, the script will iterate through all the chunks, attacking them individually.
+
+
+Thus, for attacking a subset of chunks (attacking all 250 of them, as set by the `--chunks 250` we ran earlier, would require too much time), please run
+```bash
+for idx in {1..9}; do
+python main_attack.py \
+--embs-file embeddings/embs_"$frs_method".pth \
+--restarts 5 \
+--iters 5 \
+--output-dir pgd_attack_"$frs_method" \
+--face-recog-method $frs_method \
+--load-n-embs "$NUM" \
+--attack-type manual \
+--chunks 250 \
+--load-embs \
+--num-chunk $idx;
+done
+```
+
+This command should take about 1 minutes per chunk, and we run for an extra 9 chunks.
+So, in total, it should take about 9 minutes to run in its entirety.
+
+After running this command, we have results for 10 chunks (out of 250).
+Each chunk is composed of 5k/250 = 20 instances, and we computed attacks for 10 chunks, so, in total, we attacked 20*10 = 200 instances.
+That is, we have results for 200 instances.
+These results are saved at the directory `exp_results/pgd_attack_insightface`.
+Inside this directory, there are various items.
+The three items of interest are:
+* `logs`: a directory full of `txt` files following the convention `results_chunk<X>of250.txt`, where `X` is a number between 0 and 9 in our example.
+Each of these text files reports, for its respective chunk, the amount of successful attacks, the number of instances that were attacked (20 in our example), and the average magnitude of the perturbations that were found (|\delta\|_{M,2} in the paper's notation).
+* `results`: a directory with `pth` files following the convention `results_chunk<X>of250.pth`.
+There is one such file *per* chunk in which at least one adversarial example was found.
+Upon loading these files with PyTorch (*i.e.* via `import torch; torch.load('exp_results/pgd_attack_insightface/results/results_chunk1of250.pth')`) you get a dictionary with three keys: `deltas` (the matrix of perturbation vector for each adversarial example that was found), `successes` (an array detailing for *which* instance in the chunk is it that adversarial examples were found), and `magnitudes` (a vector stating the magnitude of each perturbation that was found).
+* `figs`: a directory with `jpg` images following the convention `ori_<A>_adv_<B>.jpg`.
+There is one such image per adversarial example that was found.
+Each of these images has three faces.
+On the left, you find the original face from identity `A` (following the paper's notation); in the middle you find the modified face of identity `A` (A* in the paper's notation), and its title reports the perturbation's magnitude; on the right you find the face of identity B (following the paper's notation), with which A* is matched.
+Next, we show an example of one such image. 
+![image info](./readme_figs/ori_156_adv_4814.jpg)
+
+
+## Evaluating the attack
+Once all the results (saved at `exp_results/pgd_attack__insightface/logs/results_chunk*of250.txt`) have been computed, you can evaluate them to know the attack's success rate.
+This evaluation is performed by running the `main_attack.py` script with the flag `--eval-files` as follows:
+```bash
+python main_attack.py \
+--output-dir pgd_attack_"$frs_method" \
+--eval-files
+```
+Running this command creates the file `exp_results/pgd_attack_insightface/results.txt`.
+This file states, over the chunks that were attacked, the number of successful adversarial attacks, the number of instances that were attacked, the attack's success rate, and the average magnitude of the perturbations.
+Furthermore, this file also states the attribute-importance ranking, following the procedure we described in Section 3.5 in the paper.
+The information about this ranking is composed by (1) the ranking itself and (2) the *p*-values of each pair-wise comparison of neighboring attributes in the ranking.
+However, since our example attacked few instances (and therefore there are few adversarial examples found), most likely no statistically significant comparison will be found.
+This lack of validity implies that a ranking cannot be found, and so the two entries (corresponding to the ranking and the *p*-values will be left empty).
+
+The result's text file looks as follows:
+```
+successes:6
+instances:200
+rate:3.00
+avg_mag:1.00
+
+importance-order:NoneFound
+order-pvals:Undefined
+```
+As stated before, the last two lines of this file (corresponding to the attribute ranking and the *p*-values) report that no statistically-significant conclusions could be found.
+
+# FAB attacks
+We can also run (targeted) FAB attacks by running
+```bash
+for idx in {0..9}; do
+python main_attack.py \
+--embs-file embeddings/embs_"$frs_method".pth \
+--restarts 2 \
+--iters 5 \
+--n-target-classes 2 \
+--output-dir fab_attack_"$frs_method" \
+--face-recog-method $frs_method \
+--load-n-embs "$NUM" \
+--attack-type fab-t \
+--chunks 250 \
+--load-embs \
+--num-chunk $idx
+done
+```
+Analogous to the PGD attack we conducted earlier, this command will run attacks (in this case FAB attacks) on 10 chunks of the data.
+These attacks are run with 2 restarts, 5 iterations and 2 target classes.
+Each chunk should take about 1.5 minutes, so, in total, the 10 chunks should take about 15 minutes to finish.
+
+After the computation is done, we get the same items as for the PGD attack: the `logs`, `results` and `figs` directories.
+Each of the images in the `figs` directory corresponds to an adversarial example found by FAB.
+Since FAB can find adversarial examples for each image, this directory should have as many images as instances were attacked (200 in our example).
+We next show one nice adversarial example found by running the above command:
+![image info](./readme_figs/ori_28_adv_2915.jpg)
+
+## Evaluating the attack
+Analogous to the evaluation of PGD's results, we can evaluate FAB's results by running
+```bash
+python main_attack.py \
+--output-dir fab_attack_"$frs_method" \
+--eval-files
+```
+Similar to PGD's results, we get the text file at `exp_results/fab_attack_insightface/results.txt`, which reports
+```
+successes:200
+instances:200
+rate:100.00
+avg_mag:9.82
+
+importance-order:gender>age>eyeglasses>pose>smile
+order-pvals:3.87E-25,2.26E-02,3.74E-02,1.48E-09
+```
+This result follows the same conventions as before.
+
+# Certification
+We next showcase both isotropic and anisotropic certification.
+## Isotropic certification
+We can (isotropically) certify one identity by running the command
+```bash
+instance=5;
+sigma=1e-1
+
+skip=$((1+$instance));
+maxx=$((2*$skip));
+python certify.py \
+--skip $skip --max $maxx \
+--outfile cert_results/sigma_$sigma-instance_$instance.txt \
+--load-n-embs "$NUM" \
+--face-recog-model $frs_method \
+--sigma $sigma \
+--N 10000
+```
+Running this command should take ~5 minutes.
+This command will certify identity number 5 (for this example), under an isotropic distribution with sigma=1e-1, and with 10k Monte Carlo samples.
+After running this command, the file `cert_results/sigma_1e-1-instance_5.txt` is generated.
+This file reports instance number 5's certification radius.
+
+
+## Anisotropic certification
+We can (anisotropically) certify one identity by running the previous command, and simply adding the `--anisotropic-sigma` flag, as follows:
+```bash
+instance=5;
+sigma=1e-1
+
+skip=$((1+$instance));
+maxx=$((2*$skip));
+python certify.py \
+--skip $skip --max $maxx \
+--outfile cert_results/anisotropic-sigma_$sigma-instance_$instance.txt \
+--load-n-embs "$NUM" \
+--face-recog-model $frs_method \
+--sigma $sigma \
+--N 10000 \
+--anisotropic-sigma
+```
+Running this command should take ~5 minutes.
+This command will certify identity number 5 (for this example), under an anisotropic distribution with sigma=1e-1*inv(M), and with 10k Monte Carlo samples.
+Here, M is the matrix we defined in the paper to account for the maximum perturbation allowed for each attribute dimension (*i.e.* the same matrix used for projection during PGD).
+After running this command, the file `cert_results/anisotropic-sigma_1e-1-instance_5.txt` is generated.
+This file reports instance number 5's *proxy* certification radius (proxy since an anisotropic distribution does not have a radius in the traditional sense).
+
+# Perturbation budget
+A fundamental quantity in our work is the perturbation budget allowed for each attribute.
+These perturbation budgets can be modified via L17-21 in the `attack_utils/proj_utils.py` script, which has the following lines:
+```python
+ATTRS['age'] = 0.5
+ATTRS['eyeglasses'] = 0.5
+ATTRS['gender'] = 0.2
+ATTRS['pose'] = 0.5
+ATTRS['smile'] = 0.8
+```
+One can modify these quantities arbitrarily and re-run the experiments we showed here, yielding different results.

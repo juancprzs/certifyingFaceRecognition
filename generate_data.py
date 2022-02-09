@@ -63,8 +63,8 @@ def main():
   ims_out_dir = os.path.join(args.output_dir, 'ims')
   Path(ims_out_dir).mkdir(parents=True, exist_ok=True)
   # Tensors dir
-  tens_out_dir = os.path.join(args.output_dir, 'tensors')
-  Path(tens_out_dir).mkdir(parents=True, exist_ok=True)
+  # tens_out_dir = os.path.join(args.output_dir, 'tensors')
+  # Path(tens_out_dir).mkdir(parents=True, exist_ok=True)
 
   logger.info(f'Initializing generator.')
   gan_type = MODEL_POOL[args.model_name]['gan_type']
