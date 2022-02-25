@@ -1,5 +1,8 @@
 # Towards Assessing and Characterizing the Semantic Robustness of Face Recognition
-This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*.
+This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*. 
+The PDF file of the paper is available on [arXiv](https://arxiv.org/abs/2202.04978).
+
+**Disclaimer:** this implementation draws strongly from the implementation of [InterFaceGAN](https://github.com/genforce/interfacegan). If you are interested, please check their [work](https://arxiv.org/pdf/1907.10786.pdf).
 
 This README file shows how to use the implementation.
 Unfortunately, running the assessments we show in our paper requires large amounts of computation.
