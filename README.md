@@ -51,7 +51,7 @@ Which should return `b9b1f8b29151d5564f1be869cc26bd23`.
 ```bash
 conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia
 conda install tqdm
-pip install facenet-pytorch
+python3 -m pip install facenet_pytorch
 ```
 
 ## Create some directory
