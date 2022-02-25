@@ -1,5 +1,8 @@
 # Towards Assessing and Characterizing the Semantic Robustness of Face Recognition
-This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*.
+This is the implementation for the paper *"Towards Assessing and Characterizing the Semantic Robustness of Face Recognition"*. 
+The PDF file of the paper is available on [arXiv](https://arxiv.org/abs/2202.04978).
+
+**Disclaimer:** this implementation draws strongly from the implementation of [InterFaceGAN](https://github.com/genforce/interfacegan). If you are interested, please check their [work](https://arxiv.org/pdf/1907.10786.pdf).
 
 This README file shows how to use the implementation.
 Unfortunately, running the assessments we show in our paper requires large amounts of computation.
@@ -29,7 +32,7 @@ md5sum models/pretrain/karras2019stylegan-ffhq-1024x1024.pkl
 ```
 Which should return `5a20ed46ea6494a9e969db2f6b97a88a`.
 This is a `pkl` file, which the code converts to PyTorch weights the first time the code is run.
-On some machines, it is likely that the first time the code is run the convertion works fine, but the code exists for a (yet) unknown reason.
+On some machines, it is likely that the first time the code is run the convertion works fine, but the code exits for a (yet) unknown reason.
 If this happens in your case, please simply run the code again.
 
 ## Download Face Recognition Models' weights
@@ -44,7 +47,7 @@ md5sum weights/ms1mv3_arcface_r50/backbone.pth
 ```
 Which should return `b9b1f8b29151d5564f1be869cc26bd23`.
 
-## Install sutff
+## Install stuff
 ```bash
 conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia
 conda install tqdm
