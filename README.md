@@ -305,3 +305,14 @@ ATTRS['pose'] = 0.5
 ATTRS['smile'] = 0.8
 ```
 One can modify these quantities arbitrarily and re-run the experiments we showed here, yielding different results.
+
+# Citation
+If you find our work useful, please consider citing us with the following BibTeX entry:
+```
+@article{perez2022towards,
+    title={Towards Assessing and Characterizing the Semantic Robustness of Face Recognition},
+    author={Juan C. {P{\'e}rez} and Motasem Alfarra and Ali Thabet and Pablo {Arbel{\'a}ez} and Bernard Ghanem},
+    year={2022},
+    journal={arXiv:2202.04978},
+}
+```
