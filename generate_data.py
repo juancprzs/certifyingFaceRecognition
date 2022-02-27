@@ -19,8 +19,8 @@ from models.model_settings import MODEL_POOL
 from models.pggan_generator import PGGANGenerator
 # from models.stylegan_generator import StyleGANGenerator
 from pathlib import Path
-from proj_utils import set_seed
 from utils.logger import setup_logger
+from attack_utils.proj_utils import set_seed
 from models.mod_stylegan_generator import ModStyleGANGenerator
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
